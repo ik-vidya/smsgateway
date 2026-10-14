@@ -10,6 +10,8 @@
 *.out
 coverage.txt
 coverage.html
+*.sh
+*.py
 
 # Runtime data
 /data/
