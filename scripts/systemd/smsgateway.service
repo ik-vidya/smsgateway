@@ -1,0 +1,30 @@
+[Unit]
+Description=SMS Gateway
+Documentation=https://github.com/ik-vidya/smsgateway
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=smsgateway
+Group=dialout
+WorkingDirectory=/opt/smsgateway
+ExecStart=/opt/smsgateway/bin/smsgateway -config /etc/smsgateway/.env
+Restart=on-failure
+RestartSec=5s
+
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/smsgateway /var/spool/smsgateway
+ReadOnlyPaths=/etc/smsgateway /opt/smsgateway
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=smsgateway
+
+[Install]
+WantedBy=multi-user.target
