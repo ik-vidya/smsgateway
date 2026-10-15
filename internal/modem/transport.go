@@ -3,18 +3,16 @@
 //
 // Модель работы:
 //   - Одна горутина-writer: сериализует запись в порт.
-//   - Одна горутина-reader: читает строки, классифицирует их
-//     (URC / эхо / ответ) и раскладывает по каналам.
-//   - Exec(ctx, cmd): синхронный вызов команды, ждёт ответа в respCh,
-//     не блокируя обработку URC.
+//   - Одна горутина-reader: побайтово читает порт, собирает строки,
+//     распознаёт URC, эхо, prompt "> " и обычные ответы.
+//   - Exec(ctx, cmd): синхронный вызов, ждёт терминатор (OK/ERROR/
+//     +CME ERROR/+CMS ERROR). URC и prompt не попадают в ответ.
+//   - ExecPrompt(ctx, cmd, payload): для AT+CMGS — ждёт "> ",
+//     пишет payload, продолжает ждать терминатор.
 //   - URCs(): канал URC для сервисного слоя.
-//
-// Это необходимо, потому что на SIM800L (и большинстве модемов) URC
-// приходят асинхронно и могут вклиниваться в ответ на AT-команду.
 package modem
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -27,8 +25,6 @@ import (
 )
 
 // Transport — минимальный интерфейс для последовательного порта.
-// Реализуется go.bug.st/serial.Port, но абстракция позволяет
-// подставить mock в тестах.
 type Transport interface {
 	Read(p []byte) (int, error)
 	Write(p []byte) (int, error)
@@ -37,18 +33,12 @@ type Transport interface {
 
 // Config — параметры транспорта.
 type Config struct {
-	// CmdTimeout — таймаут ожидания ответа на AT-команду.
 	CmdTimeout time.Duration
-
-	// Profile — профиль модема. Определяет специфику разбора URC
-	// и опциональные хуки.
-	Profile profiles.Profile
-
-	// Logger — логгер. Обычно slog.Default().
-	Logger Logger
+	Profile    profiles.Profile
+	Logger     Logger
 }
 
-// Logger — минимальный интерфейс логгера, чтобы не тащить сюда slog.
+// Logger — минимальный интерфейс логгера.
 type Logger interface {
 	Debug(msg string, args ...any)
 	Info(msg string, args ...any)
@@ -56,8 +46,7 @@ type Logger interface {
 	Error(msg string, args ...any)
 }
 
-// New создаёт транспорт на базе io.ReadWriteCloser.
-// Читатель и писатель запускаются сразу; останавливаются по Close.
+// New создаёт транспорт на базе Transport.
 func New(t Transport, cfg Config) (*ATTransport, error) {
 	if t == nil {
 		return nil, errors.New("transport не задан")
@@ -78,12 +67,10 @@ func New(t Transport, cfg Config) (*ATTransport, error) {
 		cfg:       cfg,
 		respCh:    make(chan string, 64),
 		urcCh:     make(chan URC, 64),
-		cmdMu:     sync.Mutex{},
 		writerCh:  make(chan []byte, 16),
 		closedCh:  make(chan struct{}),
 		ctx:       ctx,
 		cancel:    cancel,
-		reader:    bufio.NewReaderSize(t, 4096),
 	}
 	a.wg.Add(2)
 	go a.readerLoop()
@@ -91,26 +78,24 @@ func New(t Transport, cfg Config) (*ATTransport, error) {
 	return a, nil
 }
 
-// ATTransport — обёртка над Transport с разделением на respCh/urcCh.
+// ATTransport — обёртка над Transport.
 type ATTransport struct {
 	transport Transport
 	cfg       Config
-	reader    *bufio.Reader
 
-	// Один Exec в любой момент времени; гарантирует, что ответы
-	// одной команды не смешаются с другой.
+	// Один Exec в любой момент времени.
 	cmdMu sync.Mutex
 
 	// Каналы.
-	respCh  chan string // строки ответа текущей команды
-	urcCh   chan URC    // асинхронные URC
+	respCh   chan string
+	urcCh    chan URC
 	writerCh chan []byte
 
 	// Жизненный цикл.
-	ctx      context.Context
-	cancel   context.CancelFunc
-	wg       sync.WaitGroup
-	closedCh chan struct{}
+	ctx       context.Context
+	cancel    context.CancelFunc
+	wg        sync.WaitGroup
+	closedCh  chan struct{}
 	closeOnce sync.Once
 }
 
@@ -118,28 +103,31 @@ type ATTransport struct {
 func (a *ATTransport) URCs() <-chan URC { return a.urcCh }
 
 // Exec отправляет команду и ждёт ответа.
-//
-//   - Пишет cmd + "\r" в порт.
-//   - Читает строки из respCh до терминатора:
-//     "OK", "ERROR", "+CME ERROR: ...", "+CMS ERROR: ..."
-//     или до истечения timeout.
-//   - Возвращает собранные строки и ошибку, если терминатор — ERROR
-//     или таймаут.
-//
-// URC, пришедшие во время выполнения, автоматически уходят в urcCh
-// и не влияют на ответ.
 func (a *ATTransport) Exec(ctx context.Context, cmd string) (Response, error) {
+	return a.exec(ctx, cmd, nil, false)
+}
+
+// ExecPrompt отправляет команду, ждёт prompt "> ", пишет payload,
+// и ждёт терминатор. Используется для AT+CMGS.
+func (a *ATTransport) ExecPrompt(ctx context.Context, cmd string, payload []byte) (Response, error) {
+	return a.exec(ctx, cmd, payload, true)
+}
+
+// exec — общий путь для Exec и ExecPrompt.
+//
+// waitPrompt=true: после отправки команды ждём строку "> " в respCh,
+// затем отправляем payload, затем ждём терминатор.
+// waitPrompt=false: только отправляем команду и ждём терминатор.
+func (a *ATTransport) exec(ctx context.Context, cmd string, payload []byte, waitPrompt bool) (Response, error) {
 	select {
 	case <-a.closedCh:
 		return Response{}, errors.New("транспорт закрыт")
 	default:
 	}
 
-	// Сериализация: одна команда за раз.
 	a.cmdMu.Lock()
 	defer a.cmdMu.Unlock()
 
-	// Очистить возможные остатки от прошлых команд.
 	a.drainRespCh()
 
 	a.cfg.Logger.Debug("AT →", "cmd", cmd)
@@ -157,10 +145,46 @@ func (a *ATTransport) Exec(ctx context.Context, cmd string) (Response, error) {
 		timeout = a.cfg.CmdTimeout
 	}
 
+	resp := Response{Command: cmd}
 	deadline := time.NewTimer(timeout)
 	defer deadline.Stop()
 
-	resp := Response{Command: cmd}
+	// Фаза 1 (только для waitPrompt): ждём "> ".
+	if waitPrompt {
+		gotPrompt := false
+		for !gotPrompt {
+			select {
+			case <-ctx.Done():
+				return resp, ctx.Err()
+			case <-a.closedCh:
+				return resp, errors.New("транспорт закрыт")
+			case <-deadline.C:
+				return resp, fmt.Errorf("таймаут %s ожидания prompt на %q",
+					timeout, cmd)
+			case line := <-a.respCh:
+				a.cfg.Logger.Debug("AT ←", "line", line)
+				if isPrompt(line) {
+					gotPrompt = true
+					continue
+				}
+				if term, ok := classifyTerminator(line); ok {
+					resp.Lines = append(resp.Lines, line)
+					if term == termOK {
+						return resp, nil
+					}
+					return resp, errorFromTerminator(line)
+				}
+				// Прочие строки (обычно эхо) — просто логируем.
+			}
+		}
+		// Отправляем payload.
+		a.cfg.Logger.Debug("AT →", "payload_bytes", len(payload))
+		if _, err := a.write(payload); err != nil {
+			return resp, fmt.Errorf("запись payload: %w", err)
+		}
+	}
+
+	// Фаза 2: ждём терминатор.
 	for {
 		select {
 		case <-ctx.Done():
@@ -172,6 +196,9 @@ func (a *ATTransport) Exec(ctx context.Context, cmd string) (Response, error) {
 				timeout, cmd)
 		case line := <-a.respCh:
 			a.cfg.Logger.Debug("AT ←", "line", line)
+			if isPrompt(line) {
+				continue
+			}
 			if term, ok := classifyTerminator(line); ok {
 				resp.Lines = append(resp.Lines, line)
 				if term == termOK {
@@ -182,6 +209,11 @@ func (a *ATTransport) Exec(ctx context.Context, cmd string) (Response, error) {
 			resp.Lines = append(resp.Lines, line)
 		}
 	}
+}
+
+// isPrompt сообщает, является ли строка prompt-приглашением модема.
+func isPrompt(line string) bool {
+	return line == "> " || line == ">"
 }
 
 // write отправляет байты в порт через канал writer.
@@ -195,24 +227,15 @@ func (a *ATTransport) write(data []byte) (int, error) {
 }
 
 // Close останавливает reader/writer, закрывает каналы и порт.
-// Идемпотентна.
-//
-// Порядок:
-//  1. cancel() — сигнал для writer и reader (на случай, если они
-//     проверяют контекст).
-//  2. transport.Close() — заставляет базовый Read вернуть ошибку,
-//     чтобы readerLoop вышел из блокирующего Read.
-//  3. wg.Wait() — ждём завершения обеих горутин.
-//  4. close(closedCh) — сигнал для Exec, что транспорт закрыт.
 func (a *ATTransport) Close() error {
-    var err error
-    a.closeOnce.Do(func() {
-	a.cancel()
-	err = a.transport.Close()
-	a.wg.Wait()
-	close(a.closedCh)
-    })
-    return err
+	var err error
+	a.closeOnce.Do(func() {
+		a.cancel()
+		err = a.transport.Close()
+		a.wg.Wait()
+		close(a.closedCh)
+	})
+	return err
 }
 
 // ==================== горутины ====================
@@ -232,10 +255,19 @@ func (a *ATTransport) writerLoop() {
 	}
 }
 
+// readerLoop читает порт побайтово, собирает строки по \n и
+// распознаёт prompt "> " (без \n).
+//
+// Побайтовое чтение выбрано ради prompt: модем присылает "> " без
+// перевода строки и сразу ждёт PDU, поэтому построчный ReadString
+// заблокировался бы навсегда.
 func (a *ATTransport) readerLoop() {
 	defer a.wg.Done()
 	defer close(a.respCh)
 	defer close(a.urcCh)
+
+	buf := make([]byte, 0, 256)
+	tmp := make([]byte, 1)
 
 	for {
 		select {
@@ -244,7 +276,7 @@ func (a *ATTransport) readerLoop() {
 		default:
 		}
 
-		line, err := a.reader.ReadString('\n')
+		n, err := a.transport.Read(tmp)
 		if err != nil {
 			if errors.Is(err, io.EOF) {
 				a.cfg.Logger.Debug("reader: EOF")
@@ -258,18 +290,46 @@ func (a *ATTransport) readerLoop() {
 			a.cfg.Logger.Error("reader: чтение", "err", err)
 			return
 		}
-
-		line = strings.TrimRight(line, "\r\n")
-		if line == "" {
+		if n == 0 {
 			continue
 		}
-		a.dispatch(line)
+
+		c := tmp[0]
+		buf = append(buf, c)
+
+		// Проверка prompt: "> " в конце буфера (без \n).
+		if len(buf) >= 2 && buf[len(buf)-2] == '>' && buf[len(buf)-1] == ' ' {
+			select {
+			case a.respCh <- "> ":
+			case <-a.ctx.Done():
+				return
+			}
+			buf = buf[:0]
+			continue
+		}
+		// Одиночный ">" тоже иногда используется.
+		if len(buf) == 1 && buf[0] == '>' {
+			// Ждём ещё байт, чтобы решить: "> " (с пробелом) или ">".
+			// Если следующий байт — не пробел, отдадим ">" как строку.
+			// Для простоты оставим в буфере, разберёмся по \n или по
+			// следующему символу.
+			continue
+		}
+
+		// Конец строки.
+		if c == '\n' {
+			line := strings.TrimRight(string(buf), "\r\n")
+			buf = buf[:0]
+			if line == "" {
+				continue
+			}
+			a.dispatch(line)
+		}
 	}
 }
 
-// dispatch классифицирует строку: URC, эхо или ответ.
+// dispatch классифицирует строку: URC или ответ.
 func (a *ATTransport) dispatch(line string) {
-	// 1. URC?
 	if urc, ok := a.tryParseURC(line); ok {
 		select {
 		case a.urcCh <- urc:
@@ -277,8 +337,6 @@ func (a *ATTransport) dispatch(line string) {
 		}
 		return
 	}
-
-	// 2. Ответ на команду.
 	select {
 	case a.respCh <- line:
 	case <-a.ctx.Done():
@@ -286,16 +344,8 @@ func (a *ATTransport) dispatch(line string) {
 }
 
 // tryParseURC пытается распознать строку как URC.
-//
-// Сначала пробуем специфичный парсер профиля (для нестандартных URC),
-// потом стандартные.
 func (a *ATTransport) tryParseURC(line string) (URC, bool) {
-	// Специфичные URC профиля — если профиль это умеет.
-	// (Интерфейс profiles.Profile пока не содержит ParseURC, но
-	// зарезервировано на будущее.)
 	_ = a.cfg.Profile
-
-	// Стандартные URC.
 	return parseStandardURC(line)
 }
 

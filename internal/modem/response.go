@@ -9,8 +9,8 @@ import (
 
 // Response — результат выполнения AT-команды.
 type Response struct {
-	Command string   // исходная команда (без \r)
-	Lines   []string // все строки, включая терминатор
+	Command string
+	Lines   []string
 }
 
 // OK — команда завершилась успешно.
@@ -34,7 +34,7 @@ func (r Response) String() string {
 	return strings.Join(r.Payload(), "\n")
 }
 
-// Error — ошибка выполнения AT-команды.
+// ATError — ошибка от модема.
 type ATError struct {
 	Line string
 }
@@ -54,6 +54,9 @@ const (
 )
 
 // classifyTerminator проверяет, является ли строка терминатором.
+//
+// Prompt "> " НЕ является терминатором — он обрабатывается отдельно
+// (в readerLoop и exec).
 func classifyTerminator(line string) (terminator, bool) {
 	switch {
 	case line == "OK":
@@ -86,7 +89,8 @@ func IsATError(err error) bool {
 	return errors.As(err, &e)
 }
 
-// nopLogger — логгер-заглушка.
+// ==================== заглушка логгера ====================
+
 type nopLogger struct{}
 
 func (nopLogger) Debug(string, ...any) {}
@@ -96,7 +100,6 @@ func (nopLogger) Error(string, ...any) {}
 
 // ==================== интерпретация ошибок ====================
 
-// cmеErrors — расшифровки CME-кодов (3GPP TS 27.007).
 var cmeErrors = map[int]string{
 	0:   "phone failure",
 	3:   "operation not allowed",
@@ -122,7 +125,6 @@ var cmeErrors = map[int]string{
 	100: "unknown (команда не поддерживается модемом)",
 }
 
-// cmsErrors — расшифровки CMS-кодов (3GPP TS 27.005).
 var cmsErrors = map[int]string{
 	300: "ME failure",
 	301: "SMS service of ME reserved",
@@ -143,12 +145,10 @@ var cmsErrors = map[int]string{
 	331: "no network service",
 	332: "network timeout",
 	500: "unknown error (часто: нет баланса или SMS-центр недоступен)",
-	// SIMCom proprietary.
 	2171: "нет сети (SIMCom): модем не зарегистрирован",
 	2172: "нет сети (SIMCom): сеть недоступна",
 }
 
-// simcomTextErrors — текстовые коды SIM800.
 var simcomTextErrors = map[string]string{
 	"Temporary failure":        "временный сбой: SMSC недоступен (повторить)",
 	"No network service":       "нет сети: модем не зарегистрирован",
