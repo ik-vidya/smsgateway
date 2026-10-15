@@ -2,8 +2,8 @@
 //
 // Реализован через sync.Cond + bytes.Buffer. Reader блокируется на
 // cond.Wait() до появления данных. Писатель добавляет данные и
-// вызывает cond.Broadcast(). Это надёжнее io.Pipe в сценариях,
-// где порядок вызовов Read/Write не гарантирован.
+// вызывает cond.Broadcast(). Все записи в порт дополнительно
+// копятся в writeBuf для проверки в тестах через WrittenBytes().
 package modem
 
 import (
@@ -15,11 +15,12 @@ import (
 
 // MockTransport — io.ReadWriter для тестов.
 type MockTransport struct {
-	mu     sync.Mutex
-	cond   *sync.Cond
-	buf    bytes.Buffer
-	script []mockResponse
-	closed bool
+	mu       sync.Mutex
+	cond     *sync.Cond
+	buf      bytes.Buffer // данные, ожидающие чтения
+	writeBuf bytes.Buffer // история всего, что было записано
+	script   []mockResponse
+	closed   bool
 }
 
 type mockResponse struct {
@@ -82,6 +83,11 @@ func (m *MockTransport) Read(p []byte) (int, error) {
 //
 // Сначала ищет точное совпадение по matchCmd, затем первый
 // unsolicited (matchCmd == "").
+//
+// ВАЖНО: found копируется по значению (а не по указателю на элемент
+// slice), потому что append(m.script[:i], m.script[i+1:]...) сдвигает
+// элементы in-place, и указатель на m.script[i] после этого указывает
+// уже на другой ответ.
 func (m *MockTransport) Write(p []byte) (int, error) {
 	cmd := string(bytes.TrimRight(p, "\r\n"))
 
@@ -90,21 +96,28 @@ func (m *MockTransport) Write(p []byte) (int, error) {
 		m.mu.Unlock()
 		return 0, io.ErrClosedPipe
 	}
+	m.writeBuf.Write(p)
 
-	var found *mockResponse
+	var found mockResponse
+	var foundOK bool
+
+	// 1. Точное совпадение по команде.
 	for i := range m.script {
-		r := &m.script[i]
+		r := m.script[i]
 		if r.matchCmd == cmd {
 			found = r
+			foundOK = true
 			m.script = append(m.script[:i], m.script[i+1:]...)
 			break
 		}
 	}
-	if found == nil {
+	// 2. Если нет — первый unsolicited.
+	if !foundOK {
 		for i := range m.script {
-			r := &m.script[i]
+			r := m.script[i]
 			if r.matchCmd == "" {
 				found = r
+				foundOK = true
 				m.script = append(m.script[:i], m.script[i+1:]...)
 				break
 			}
@@ -112,8 +125,8 @@ func (m *MockTransport) Write(p []byte) (int, error) {
 	}
 	m.mu.Unlock()
 
-	if found != nil {
-		go m.deliver(*found)
+	if foundOK {
+		go m.deliver(found)
 	}
 	return len(p), nil
 }
@@ -146,4 +159,13 @@ func (m *MockTransport) Close() error {
 	m.closed = true
 	m.cond.Broadcast()
 	return nil
+}
+
+// WrittenBytes возвращает всё, что было записано в порт.
+// Полезно в тестах для проверки, что определённая AT-команда
+// была отправлена.
+func (m *MockTransport) WrittenBytes() []byte {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]byte(nil), m.writeBuf.Bytes()...)
 }
