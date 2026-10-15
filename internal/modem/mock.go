@@ -169,3 +169,12 @@ func (m *MockTransport) WrittenBytes() []byte {
 	defer m.mu.Unlock()
 	return append([]byte(nil), m.writeBuf.Bytes()...)
 }
+
+// ResetWritten очищает историю записей в порт.
+// Полезно в тестах, когда нужно проверить только последующие команды.
+func (m *MockTransport) ResetWritten() {
+    m.mu.Lock()
+    defer m.mu.Unlock()
+    m.writeBuf.Reset()
+}
+

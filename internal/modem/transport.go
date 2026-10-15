@@ -3,15 +3,14 @@
 //
 // Модель работы:
 //   - Одна горутина-reader: побайтово читает порт, собирает строки,
-//     распознаёт URC, эхо, prompt "> " и обычные ответы.
-//   - Exec(ctx, cmd): синхронный вызов, ждёт терминатор (OK/ERROR/
-//     +CME ERROR/+CMS ERROR). URC и prompt не попадают в ответ.
-//   - ExecPrompt(ctx, cmd, payload): для AT+CMGS — ждёт "> ",
-//     пишет payload, продолжает ждать терминатор.
+//     распознаёт URC, эхо, prompt "> " и обычные ответы. Для +CDS
+//     читает следующую строку как hex-PDU отчёта.
+//   - Exec(ctx, cmd): синхронный вызов, ждёт терминатор.
+//   - ExecPrompt(ctx, cmd, payload): для AT+CMGS.
 //   - URCs(): канал URC для сервисного слоя.
 //
 // Запись в порт синхронная. Все команды сериализуются через cmdMu,
-// поэтому одной горутины-писателя не требуется.
+// поэтому отдельной writer-горутины не требуется.
 package modem
 
 import (
@@ -23,6 +22,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ik-vidya/sim800ctl/pkg/pdu"
 	"github.com/ik-vidya/smsgateway/internal/profiles"
 )
 
@@ -83,14 +83,16 @@ type ATTransport struct {
 	transport Transport
 	cfg       Config
 
-	// Один Exec в любой момент времени.
 	cmdMu sync.Mutex
 
-	// Каналы.
 	respCh chan string
 	urcCh  chan URC
 
-	// Жизненный цикл.
+	// pendingCDS — состояние reader-горутины: получен +CDS header,
+	// ждём hex-PDU. При получении PDU URC обогащается и уходит
+	// в urcCh.
+	pendingCDS *URCCDS
+
 	ctx       context.Context
 	cancel    context.CancelFunc
 	wg        sync.WaitGroup
@@ -112,7 +114,6 @@ func (a *ATTransport) ExecPrompt(ctx context.Context, cmd string, payload []byte
 	return a.exec(ctx, cmd, payload, true)
 }
 
-// exec — общий путь для Exec и ExecPrompt.
 func (a *ATTransport) exec(ctx context.Context, cmd string, payload []byte, waitPrompt bool) (Response, error) {
 	select {
 	case <-a.closedCh:
@@ -144,7 +145,6 @@ func (a *ATTransport) exec(ctx context.Context, cmd string, payload []byte, wait
 	deadline := time.NewTimer(timeout)
 	defer deadline.Stop()
 
-	// Фаза 1 (только для waitPrompt): ждём "> ".
 	if waitPrompt {
 		gotPrompt := false
 		for !gotPrompt {
@@ -180,7 +180,6 @@ func (a *ATTransport) exec(ctx context.Context, cmd string, payload []byte, wait
 		}
 	}
 
-	// Фаза 2: ждём терминатор.
 	for {
 		select {
 		case <-ctx.Done():
@@ -210,20 +209,14 @@ func (a *ATTransport) exec(ctx context.Context, cmd string, payload []byte, wait
 	}
 }
 
-// isPrompt сообщает, является ли строка prompt-приглашением модема.
 func isPrompt(line string) bool {
 	return line == "> " || line == ">"
 }
 
-// writeString пишет строку в порт синхронно.
 func (a *ATTransport) writeString(s string) error {
 	return a.writeBytes([]byte(s))
 }
 
-// writeBytes пишет байты в порт синхронно.
-//
-// Синхронность важна для тестов и для корректного порядка: после
-// возврата из writeBytes данные гарантированно переданы в порт.
 func (a *ATTransport) writeBytes(data []byte) error {
 	select {
 	case <-a.closedCh:
@@ -252,10 +245,6 @@ func (a *ATTransport) Close() error {
 
 // readerLoop читает порт побайтово, собирает строки по \n и
 // распознаёт prompt "> " (без \n).
-//
-// Побайтовое чтение выбрано ради prompt: модем присылает "> " без
-// перевода строки и сразу ждёт PDU, поэтому построчный ReadString
-// заблокировался бы навсегда.
 func (a *ATTransport) readerLoop() {
 	defer a.wg.Done()
 	defer close(a.respCh)
@@ -292,7 +281,7 @@ func (a *ATTransport) readerLoop() {
 		c := tmp[0]
 		buf = append(buf, c)
 
-		// Проверка prompt: "> " в конце буфера (без \n).
+		// Prompt "> " — без \n.
 		if len(buf) >= 2 && buf[len(buf)-2] == '>' && buf[len(buf)-1] == ' ' {
 			select {
 			case a.respCh <- "> ":
@@ -303,7 +292,6 @@ func (a *ATTransport) readerLoop() {
 			continue
 		}
 
-		// Конец строки.
 		if c == '\n' {
 			line := strings.TrimRight(string(buf), "\r\n")
 			buf = buf[:0]
@@ -316,18 +304,68 @@ func (a *ATTransport) readerLoop() {
 }
 
 // dispatch классифицирует строку: URC или ответ.
+//
+// Особая логика для +CDS: после заголовка "+CDS: <len>" ожидается
+// hex-PDU в следующей строке. Пока PDU не получен, URC не уходит
+// в urcCh — он копится в a.pendingCDS.
 func (a *ATTransport) dispatch(line string) {
+	// 1. Ждём PDU после +CDS.
+	if a.pendingCDS != nil {
+		if isHexLine(line) {
+			a.enrichCDS(a.pendingCDS, line)
+			select {
+			case a.urcCh <- *a.pendingCDS:
+			case <-a.ctx.Done():
+			}
+			a.pendingCDS = nil
+			return
+		}
+		// Не hex — значит PDU не пришёл. Отправляем URC без PDU
+		// и обрабатываем текущую строку как обычно.
+		select {
+		case a.urcCh <- *a.pendingCDS:
+		case <-a.ctx.Done():
+		}
+		a.pendingCDS = nil
+		// fallthrough
+	}
+
+	// 2. Обычная классификация.
 	if urc, ok := a.tryParseURC(line); ok {
+		if cds, isCDS := urc.(URCCDS); isCDS {
+			// +CDS header — ждём PDU.
+			cp := cds
+			a.pendingCDS = &cp
+			return
+		}
 		select {
 		case a.urcCh <- urc:
 		case <-a.ctx.Done():
 		}
 		return
 	}
+
 	select {
 	case a.respCh <- line:
 	case <-a.ctx.Done():
 	}
+}
+
+// enrichCDS декодирует PDU отчёта и заполняет поля URCCDS.
+func (a *ATTransport) enrichCDS(cds *URCCDS, pduHex string) {
+	cds.PDU = pduHex
+	d, err := pdu.Decode(pduHex)
+	if err != nil {
+		a.cfg.Logger.Warn("+CDS: PDU decode", "err", err, "pdu", pduHex)
+		return
+	}
+	if d.Type != "status-report" {
+		a.cfg.Logger.Warn("+CDS: PDU не status-report", "type", d.Type)
+		return
+	}
+	cds.Reference = d.Reference
+	cds.TPST = d.Status
+	cds.Peer = d.Peer
 }
 
 // tryParseURC пытается распознать строку как URC.

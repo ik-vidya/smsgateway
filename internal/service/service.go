@@ -183,49 +183,58 @@ func (s *Service) urcLoop(ctx context.Context) {
 }
 
 func (s *Service) handleURC(ctx context.Context, u modem.URC) {
-	switch v := u.(type) {
-	case modem.URCCMTI:
-		s.logger.Info("service: новый SMS",
-			"mem", v.Mem, "index", v.Index)
-		if err := s.ingestSMS(ctx, v.Index); err != nil {
-			s.logger.Error("service: ingestSMS", "err", err, "index", v.Index)
-		}
-
-	case modem.URCCDS:
-		s.logger.Info("service: delivery report", "raw", v.RawLine())
-		// PDU отчёта придёт следующей строкой через readerLoop.
-		// Разбор PDU — отдельная задача, см. HandleDeliveryReport.
-
-	case modem.URCCREG:
-		s.mu.Lock()
-		s.networkStat = v.Stat
-		s.mu.Unlock()
-		s.logger.Info("service: регистрация",
-			"stat", v.Stat, "lac", v.LAC, "cid", v.CID)
-
-	case modem.URCCGREG:
-		s.logger.Info("service: GPRS-регистрация",
-			"stat", v.Stat, "lac", v.LAC, "cid", v.CID)
-
-	case modem.URCCBC:
-		s.logger.Debug("service: батарея",
-			"percent", v.Percent, "mv", v.MilliV)
-
-	case modem.URCRDY:
-		s.logger.Warn("service: модем перезапустился (RDY)")
-
-	case modem.URCRing:
-		s.logger.Info("service: входящий звонок")
-
-	case modem.URCNoCarrier:
-		s.logger.Info("service: соединение потеряно")
-
-	case modem.URCCUSD:
-		s.logger.Info("service: USSD", "stat", v.Stat, "text", v.Text)
-
-	default:
-		s.logger.Debug("service: неизвестный URC", "kind", u.Kind())
+    switch v := u.(type) {
+    case modem.URCCMTI:
+	s.logger.Info("service: новый SMS",
+	    "mem", v.Mem, "index", v.Index)
+	if err := s.ingestSMS(ctx, v.Index); err != nil {
+	    s.logger.Error("service: ingestSMS", "err", err, "index", v.Index)
 	}
+
+    case modem.URCCDS:
+	s.logger.Info("service: delivery report",
+	    "ref", v.Reference, "tpst", v.TPST, "peer", v.Peer)
+	if v.PDU == "" {
+	    // Не удалось получить PDU — не можем сопоставить.
+	    s.logger.Warn("service: +CDS без PDU, пропускаю")
+	    return
+	}
+	if err := s.HandleDeliveryReport(ctx,
+	    v.Reference, v.TPST, v.PDU); err != nil {
+	    s.logger.Warn("service: HandleDeliveryReport",
+		"ref", v.Reference, "err", err)
+	}
+
+    case modem.URCCREG:
+	s.mu.Lock()
+	s.networkStat = v.Stat
+	s.mu.Unlock()
+	s.logger.Info("service: регистрация",
+	    "stat", v.Stat, "lac", v.LAC, "cid", v.CID)
+
+    case modem.URCCGREG:
+	s.logger.Info("service: GPRS-регистрация",
+	    "stat", v.Stat, "lac", v.LAC, "cid", v.CID)
+
+    case modem.URCCBC:
+	s.logger.Debug("service: батарея",
+	    "percent", v.Percent, "mv", v.MilliV)
+
+    case modem.URCRDY:
+	s.logger.Warn("service: модем перезапустился (RDY)")
+
+    case modem.URCRing:
+	s.logger.Info("service: входящий звонок")
+
+    case modem.URCNoCarrier:
+	s.logger.Info("service: соединение потеряно")
+
+    case modem.URCCUSD:
+	s.logger.Info("service: USSD", "stat", v.Stat, "text", v.Text)
+
+    default:
+	s.logger.Debug("service: неизвестный URC", "kind", u.Kind())
+    }
 }
 
 // ingestSMS читает SMS по индексу из памяти модема, сохраняет в БД

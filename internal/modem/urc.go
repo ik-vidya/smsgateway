@@ -7,14 +7,11 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"time"
 )
 
 // URC — асинхронное сообщение от модема.
 type URC interface {
-	// Kind — короткий идентификатор ("cms", "cds", "creg", ...).
 	Kind() string
-	// RawLine — исходная строка (для логов).
 	RawLine() string
 }
 
@@ -28,12 +25,19 @@ type URCCMTI struct {
 func (u URCCMTI) Kind() string    { return "cmti" }
 func (u URCCMTI) RawLine() string { return u.Raw }
 
-// URCCDS — "+CDS: <len>" — отчёт о доставке; PDU идёт следующей
-// строкой. Храним его как два поля.
+// URCCDS — "+CDS: <len>" + PDU — отчёт о доставке.
+//
+// Reader-горутина распознаёт "+CDS:" в одной строке, затем
+// читает следующую строку как hex-PDU, декодирует её и заполняет
+// Reference/TPST/Peer. Только после этого URC отправляется
+// в канал urcCh.
 type URCCDS struct {
-	Length int
-	PDU    string
-	Raw    string
+	Length    int    // значение из "+CDS: <len>"
+	Raw       string // строка заголовка, например "+CDS: 25"
+	PDU       string // hex PDU отчёта (пусто, если не удалось получить)
+	Reference int    // TP-MR (совпадает с reference отправки)
+	TPST      int    // TP-ST: 0x00 = доставлено
+	Peer      string // RA — номер абонента
 }
 
 func (u URCCDS) Kind() string    { return "cds" }
@@ -120,12 +124,13 @@ var (
 // parseStandardURC распознаёт стандартные URC.
 //
 // Возвращает (URC, true), если строка — URC.
+//
+// Для +CDS возвращает URCCDS с пустым PDU — reader-горутина
+// должна дождаться следующей строки (hex-PDU) и дополнить его.
 func parseStandardURC(line string) (URC, bool) {
-	// RDY — модем перезапустился.
 	if line == "RDY" {
 		return URCRDY{Raw: line}, true
 	}
-	// RING, NO CARRIER.
 	if line == "RING" {
 		return URCRing{Raw: line}, true
 	}
@@ -133,19 +138,16 @@ func parseStandardURC(line string) (URC, bool) {
 		return URCNoCarrier{Raw: line}, true
 	}
 
-	// +CMTI: "SM",5
 	if m := reCMTI.FindStringSubmatch(line); m != nil {
 		idx, _ := strconv.Atoi(m[2])
 		return URCCMTI{Mem: m[1], Index: idx, Raw: line}, true
 	}
 
-	// +CDS: 25
 	if m := reCDS.FindStringSubmatch(line); m != nil {
 		ln, _ := strconv.Atoi(m[1])
 		return URCCDS{Length: ln, Raw: line}, true
 	}
 
-	// +CREG: 2,5,"00DF","156B"
 	if m := reCREG.FindStringSubmatch(line); m != nil {
 		stat, _ := strconv.Atoi(m[2])
 		u := URCCREG{Stat: stat, Raw: line}
@@ -156,7 +158,6 @@ func parseStandardURC(line string) (URC, bool) {
 		return u, true
 	}
 
-	// +CGREG: 2,5,"00DF","156B"
 	if m := reCGREG.FindStringSubmatch(line); m != nil {
 		stat, _ := strconv.Atoi(m[2])
 		u := URCCGREG{Stat: stat, Raw: line}
@@ -167,13 +168,11 @@ func parseStandardURC(line string) (URC, bool) {
 		return u, true
 	}
 
-	// +CUSD: 0,"ответ",15
 	if m := reCUSD.FindStringSubmatch(line); m != nil {
 		stat, _ := strconv.Atoi(m[1])
 		return URCCUSD{Stat: stat, Text: m[2], Raw: line}, true
 	}
 
-	// +CBC: 0,100,4411
 	if m := reCBC.FindStringSubmatch(line); m != nil {
 		st, _ := strconv.Atoi(m[1])
 		pct, _ := strconv.Atoi(m[2])
@@ -182,6 +181,22 @@ func parseStandardURC(line string) (URC, bool) {
 	}
 
 	return nil, false
+}
+
+// isHexLine проверяет, что строка — hex-последовательность
+// (чётная длина, только hex-символы).
+func isHexLine(s string) bool {
+	if len(s) < 4 || len(s)%2 != 0 {
+		return false
+	}
+	for _, r := range s {
+		if !((r >= '0' && r <= '9') ||
+			(r >= 'A' && r <= 'F') ||
+			(r >= 'a' && r <= 'f')) {
+			return false
+		}
+	}
+	return true
 }
 
 // ==================== читаемые формы ====================
@@ -205,12 +220,34 @@ func InterpretCREGStat(stat int) string {
 	return fmt.Sprintf("неизвестный статус %d", stat)
 }
 
+// InterpretTPST расшифровывает TP-ST из SMS-STATUS-REPORT.
+func InterpretTPST(tpst int) string {
+	switch tpst {
+	case 0x00:
+		return "доставлено"
+	case 0x01:
+		return "получено SMSC"
+	case 0x02:
+		return "заменено"
+	case 0x20:
+		return "не доставлено (нет абонента)"
+	case 0x21:
+		return "не доставлено (занято)"
+	case 0x22:
+		return "не доставлено (нет ответа)"
+	case 0x40:
+		return "ошибка SMSC"
+	}
+	return fmt.Sprintf("неизвестный статус 0x%02X", tpst)
+}
+
 // String для логов.
 func (u URCCMTI) String() string {
 	return fmt.Sprintf("CMTI{mem=%s, idx=%d}", u.Mem, u.Index)
 }
 func (u URCCDS) String() string {
-	return fmt.Sprintf("CDS{len=%d}", u.Length)
+	return fmt.Sprintf("CDS{ref=%d, tpst=0x%02X (%s), peer=%s}",
+		u.Reference, u.TPST, InterpretTPST(u.TPST), u.Peer)
 }
 func (u URCCREG) String() string {
 	return fmt.Sprintf("CREG{stat=%d (%s), lac=%s, cid=%s}",
@@ -220,25 +257,5 @@ func (u URCCGREG) String() string {
 	return fmt.Sprintf("CGREG{stat=%d, lac=%s, cid=%s}", u.Stat, u.LAC, u.CID)
 }
 
-// ==================== вспомогательное ====================
-
-// URCDeadline — рекомендуемый таймаут ожидания связанных строк URC
-// (например, PDU после +CDS).
-const URCDeadline = 2 * time.Second
-
-// isHexHex — проверка, что строка — чётный hex (для PDU после +CDS).
-func isHexHex(s string) bool {
-	if len(s) == 0 || len(s)%2 != 0 {
-		return false
-	}
-	for _, r := range s {
-		if !((r >= '0' && r <= '9') || (r >= 'A' && r <= 'F') || (r >= 'a' && r <= 'f')) {
-			return false
-		}
-	}
-	return true
-}
-
-// Suppress unused warning during early iterations.
-var _ = isHexHex
+// Suppress unused warnings.
 var _ = strings.TrimSpace

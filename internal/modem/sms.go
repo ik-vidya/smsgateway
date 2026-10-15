@@ -33,8 +33,7 @@ type SendResult struct {
 // SendSMS собирает PDU и отправляет его через AT+CMGS.
 //
 // Пока не поддерживает multipart (возвращает ошибку, если текст
-// не помещается в одну часть). Multipart появится позже, когда
-// сервисный слой научится связывать части по UDH reference.
+// не помещается в одну часть).
 func (m *Modem) SendSMS(ctx context.Context, peer, text string, opts SendOptions) (SendResult, error) {
 	// 1. PDU-режим.
 	if _, err := m.Exec(ctx, "AT+CMGF=0"); err != nil {
@@ -156,6 +155,13 @@ func (m *Modem) ReadSMS(ctx context.Context, filter ReadFilter) ([]SMSMessage, e
 		return nil, fmt.Errorf("включение PDU-режима: %w", err)
 	}
 
+	// AlignReadStorage: SIM800L может хранить входящие в SM, а
+	// читать из ME. Выравниваем перед чтением, если профиль требует.
+	if err := m.maybeAlignStorage(ctx); err != nil {
+		m.logger.Warn("modem: выравнивание storage не удалось",
+			"err", err)
+	}
+
 	// stat: 0 = unread, 4 = all.
 	stat := "4"
 	if filter.UnreadOnly {
@@ -251,26 +257,18 @@ func pduStatText(code int) string {
 	return fmt.Sprintf("STAT %d", code)
 }
 
-// isHexLine проверяет, что строка — hex-последовательность
-// (чётная длина, только hex-символы).
-func isHexLine(s string) bool {
-	if len(s) == 0 || len(s)%2 != 0 {
-		return false
-	}
-	for _, r := range s {
-		if !((r >= '0' && r <= '9') ||
-			(r >= 'A' && r <= 'F') ||
-			(r >= 'a' && r <= 'f')) {
-			return false
-		}
-	}
-	return true
-}
-
 // ==================== Delete ====================
 
 // DeleteSMS удаляет SMS по индексу.
+//
+// Перед удалением выравнивает storage (если профиль требует),
+// чтобы индекс соответствовал тому же хранилищу, из которого
+// мы читали.
 func (m *Modem) DeleteSMS(ctx context.Context, index int) error {
+	if err := m.maybeAlignStorage(ctx); err != nil {
+		m.logger.Warn("modem: выравнивание storage не удалось",
+			"err", err)
+	}
 	if _, err := m.Exec(ctx, fmt.Sprintf("AT+CMGD=%d", index)); err != nil {
 		return fmt.Errorf("AT+CMGD=%d: %w", index, err)
 	}
@@ -279,6 +277,10 @@ func (m *Modem) DeleteSMS(ctx context.Context, index int) error {
 
 // DeleteAllSMS удаляет все SMS из памяти модема.
 func (m *Modem) DeleteAllSMS(ctx context.Context) error {
+	if err := m.maybeAlignStorage(ctx); err != nil {
+		m.logger.Warn("modem: выравнивание storage не удалось",
+			"err", err)
+	}
 	if _, err := m.Exec(ctx, "AT+CMGD=1,4"); err != nil {
 		return fmt.Errorf("AT+CMGD=1,4: %w", err)
 	}
