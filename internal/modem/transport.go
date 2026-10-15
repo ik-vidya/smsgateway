@@ -2,7 +2,6 @@
 // через последовательный порт.
 //
 // Модель работы:
-//   - Одна горутина-writer: сериализует запись в порт.
 //   - Одна горутина-reader: побайтово читает порт, собирает строки,
 //     распознаёт URC, эхо, prompt "> " и обычные ответы.
 //   - Exec(ctx, cmd): синхронный вызов, ждёт терминатор (OK/ERROR/
@@ -10,6 +9,9 @@
 //   - ExecPrompt(ctx, cmd, payload): для AT+CMGS — ждёт "> ",
 //     пишет payload, продолжает ждать терминатор.
 //   - URCs(): канал URC для сервисного слоя.
+//
+// Запись в порт синхронная. Все команды сериализуются через cmdMu,
+// поэтому одной горутины-писателя не требуется.
 package modem
 
 import (
@@ -67,14 +69,12 @@ func New(t Transport, cfg Config) (*ATTransport, error) {
 		cfg:       cfg,
 		respCh:    make(chan string, 64),
 		urcCh:     make(chan URC, 64),
-		writerCh:  make(chan []byte, 16),
 		closedCh:  make(chan struct{}),
 		ctx:       ctx,
 		cancel:    cancel,
 	}
-	a.wg.Add(2)
+	a.wg.Add(1)
 	go a.readerLoop()
-	go a.writerLoop()
 	return a, nil
 }
 
@@ -87,9 +87,8 @@ type ATTransport struct {
 	cmdMu sync.Mutex
 
 	// Каналы.
-	respCh   chan string
-	urcCh    chan URC
-	writerCh chan []byte
+	respCh chan string
+	urcCh  chan URC
 
 	// Жизненный цикл.
 	ctx       context.Context
@@ -99,7 +98,7 @@ type ATTransport struct {
 	closeOnce sync.Once
 }
 
-// URCs возвращает канал URC. Канал закрывается при Close().
+// URCs возвращает канал URC.
 func (a *ATTransport) URCs() <-chan URC { return a.urcCh }
 
 // Exec отправляет команду и ждёт ответа.
@@ -114,10 +113,6 @@ func (a *ATTransport) ExecPrompt(ctx context.Context, cmd string, payload []byte
 }
 
 // exec — общий путь для Exec и ExecPrompt.
-//
-// waitPrompt=true: после отправки команды ждём строку "> " в respCh,
-// затем отправляем payload, затем ждём терминатор.
-// waitPrompt=false: только отправляем команду и ждём терминатор.
 func (a *ATTransport) exec(ctx context.Context, cmd string, payload []byte, waitPrompt bool) (Response, error) {
 	select {
 	case <-a.closedCh:
@@ -131,7 +126,7 @@ func (a *ATTransport) exec(ctx context.Context, cmd string, payload []byte, wait
 	a.drainRespCh()
 
 	a.cfg.Logger.Debug("AT →", "cmd", cmd)
-	if _, err := a.write([]byte(cmd + "\r")); err != nil {
+	if err := a.writeString(cmd + "\r"); err != nil {
 		return Response{}, fmt.Errorf("запись команды %q: %w", cmd, err)
 	}
 
@@ -161,7 +156,10 @@ func (a *ATTransport) exec(ctx context.Context, cmd string, payload []byte, wait
 			case <-deadline.C:
 				return resp, fmt.Errorf("таймаут %s ожидания prompt на %q",
 					timeout, cmd)
-			case line := <-a.respCh:
+			case line, ok := <-a.respCh:
+				if !ok {
+					return resp, errors.New("канал ответов закрыт")
+				}
 				a.cfg.Logger.Debug("AT ←", "line", line)
 				if isPrompt(line) {
 					gotPrompt = true
@@ -174,12 +172,10 @@ func (a *ATTransport) exec(ctx context.Context, cmd string, payload []byte, wait
 					}
 					return resp, errorFromTerminator(line)
 				}
-				// Прочие строки (обычно эхо) — просто логируем.
 			}
 		}
-		// Отправляем payload.
 		a.cfg.Logger.Debug("AT →", "payload_bytes", len(payload))
-		if _, err := a.write(payload); err != nil {
+		if err := a.writeBytes(payload); err != nil {
 			return resp, fmt.Errorf("запись payload: %w", err)
 		}
 	}
@@ -194,7 +190,10 @@ func (a *ATTransport) exec(ctx context.Context, cmd string, payload []byte, wait
 		case <-deadline.C:
 			return resp, fmt.Errorf("таймаут %s ожидания ответа на %q",
 				timeout, cmd)
-		case line := <-a.respCh:
+		case line, ok := <-a.respCh:
+			if !ok {
+				return resp, errors.New("канал ответов закрыт")
+			}
 			a.cfg.Logger.Debug("AT ←", "line", line)
 			if isPrompt(line) {
 				continue
@@ -216,17 +215,28 @@ func isPrompt(line string) bool {
 	return line == "> " || line == ">"
 }
 
-// write отправляет байты в порт через канал writer.
-func (a *ATTransport) write(data []byte) (int, error) {
-	select {
-	case a.writerCh <- data:
-		return len(data), nil
-	case <-a.closedCh:
-		return 0, errors.New("транспорт закрыт")
-	}
+// writeString пишет строку в порт синхронно.
+func (a *ATTransport) writeString(s string) error {
+	return a.writeBytes([]byte(s))
 }
 
-// Close останавливает reader/writer, закрывает каналы и порт.
+// writeBytes пишет байты в порт синхронно.
+//
+// Синхронность важна для тестов и для корректного порядка: после
+// возврата из writeBytes данные гарантированно переданы в порт.
+func (a *ATTransport) writeBytes(data []byte) error {
+	select {
+	case <-a.closedCh:
+		return errors.New("транспорт закрыт")
+	default:
+	}
+	if _, err := a.transport.Write(data); err != nil {
+		return err
+	}
+	return nil
+}
+
+// Close останавливает reader, закрывает каналы и порт.
 func (a *ATTransport) Close() error {
 	var err error
 	a.closeOnce.Do(func() {
@@ -238,22 +248,7 @@ func (a *ATTransport) Close() error {
 	return err
 }
 
-// ==================== горутины ====================
-
-func (a *ATTransport) writerLoop() {
-	defer a.wg.Done()
-	for {
-		select {
-		case <-a.ctx.Done():
-			return
-		case data := <-a.writerCh:
-			if _, err := a.transport.Write(data); err != nil {
-				a.cfg.Logger.Error("writer: запись", "err", err)
-				return
-			}
-		}
-	}
-}
+// ==================== reader ====================
 
 // readerLoop читает порт побайтово, собирает строки по \n и
 // распознаёт prompt "> " (без \n).
@@ -305,14 +300,6 @@ func (a *ATTransport) readerLoop() {
 				return
 			}
 			buf = buf[:0]
-			continue
-		}
-		// Одиночный ">" тоже иногда используется.
-		if len(buf) == 1 && buf[0] == '>' {
-			// Ждём ещё байт, чтобы решить: "> " (с пробелом) или ">".
-			// Если следующий байт — не пробел, отдадим ">" как строку.
-			// Для простоты оставим в буфере, разберёмся по \n или по
-			// следующему символу.
 			continue
 		}
 
