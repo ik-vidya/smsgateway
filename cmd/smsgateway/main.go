@@ -3,40 +3,135 @@ package main
 
 import (
 	"context"
-	"flag"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
+
+	"github.com/spf13/cobra"
 
 	"github.com/ik-vidya/smsgateway/internal/config"
 	"github.com/ik-vidya/smsgateway/internal/logging"
+	"github.com/ik-vidya/smsgateway/internal/storage"
 )
 
-// Версия подставляется через -ldflags.
+// Версия и время сборки подставляются через -ldflags.
 var (
 	version   = "dev"
 	buildTime = "unknown"
 )
 
+// Глобальные флаги (persistent).
+var (
+	flagConfig      string
+	flagShowVersion bool
+)
+
 func main() {
-	configPath := flag.String("config", "", "путь к .env-файлу (обязательно)")
-	showVersion := flag.Bool("version", false, "показать версию и выйти")
-	flag.Parse()
-
-	if *showVersion {
-		fmt.Printf("smsgateway %s (сборка %s)\n", version, buildTime)
-		return
-	}
-
-	if err := run(*configPath); err != nil {
-		fmt.Fprintln(os.Stderr, "fatal:", err)
+	if err := rootCmd.Execute(); err != nil {
+		fmt.Fprintln(os.Stderr, "ошибка:", err)
 		os.Exit(1)
 	}
 }
 
-func run(configPath string) error {
-	cfg, err := config.Load(configPath)
+// rootCmd — корневая команда. Без подкоманды запускает сервис.
+var rootCmd = &cobra.Command{
+	Use:   "smsgateway",
+	Short: "SMS-шлюз для AT-совместимых GSM-модемов",
+	Long: `smsgateway — долгоживущий сервис приёма и отправки SMS через
+AT-совместимый GSM-модем. Предоставляет HTTP/JSON REST API, сохраняет
+сообщения в SQLite, работает с Gammu file backend.
+
+Без подкоманды запускает сервис. Требуется флаг --config.
+
+Примеры:
+    smsgateway --config /etc/smsgateway/.env
+    smsgateway version
+    smsgateway migrate --config /etc/smsgateway/.env`,
+	SilenceUsage:  true,
+	SilenceErrors: true,
+	RunE:          runService,
+}
+
+func init() {
+	rootCmd.PersistentFlags().StringVar(&flagConfig, "config", "",
+		"путь к .env-файлу (обязателен для всех команд, кроме version)")
+	rootCmd.Flags().BoolVarP(&flagShowVersion, "version", "v", false,
+		"показать версию и выйти")
+
+	rootCmd.AddCommand(
+		cmdVersion(),
+		cmdMigrate(),
+	)
+}
+
+// cmdVersion — подкоманда `smsgateway version`.
+func cmdVersion() *cobra.Command {
+	return &cobra.Command{
+		Use:   "version",
+		Short: "Показать версию и выйти",
+		Run: func(_ *cobra.Command, _ []string) {
+			printVersion()
+		},
+	}
+}
+
+func printVersion() {
+	fmt.Printf("smsgateway %s (сборка %s)\n", version, buildTime)
+}
+
+// cmdMigrate — подкоманда `smsgateway migrate`.
+func cmdMigrate() *cobra.Command {
+	return &cobra.Command{
+		Use:   "migrate",
+		Short: "Применить миграции БД и выйти",
+		Long: `Открывает базу данных из конфига, применяет неприменённые
+миграции и завершается. Идемпотентна: повторный запуск безопасен.`,
+		RunE: runMigrate,
+	}
+}
+
+func runMigrate(_ *cobra.Command, _ []string) error {
+	cfg, err := config.Load(flagConfig)
+	if err != nil {
+		return err
+	}
+	logger, err := logging.New(cfg.LogLevel, cfg.LogFormat)
+	if err != nil {
+		return err
+	}
+
+	logger.Info("миграция БД", "db_path", cfg.DBPath)
+
+	if err := ensureDir(cfg.DBPath); err != nil {
+		return err
+	}
+
+	ctx := context.Background()
+	store, err := storage.Open(ctx, cfg.DBPath)
+	if err != nil {
+		return fmt.Errorf("открытие БД: %w", err)
+	}
+	defer func() {
+		if cerr := store.Close(); cerr != nil {
+			logger.Error("закрытие БД", "err", cerr)
+		}
+	}()
+
+	logger.Info("миграции применены")
+	return nil
+}
+
+// runService запускает основной сервис.
+func runService(_ *cobra.Command, _ []string) error {
+	if flagShowVersion {
+		printVersion()
+		return nil
+	}
+
+	cfg, err := config.Load(flagConfig)
 	if err != nil {
 		return err
 	}
@@ -59,10 +154,50 @@ func run(configPath string) error {
 		syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
-	// TODO(итерация 2+): storage, modem, service, api, webui, notify.
+	// --- Инициализация БД ---
+	if err := ensureDir(cfg.DBPath); err != nil {
+		return err
+	}
+	store, err := storage.Open(ctx, cfg.DBPath)
+	if err != nil {
+		return fmt.Errorf("открытие БД: %w", err)
+	}
+	defer func() {
+		if cerr := store.Close(); cerr != nil {
+			logger.Error("закрытие БД", "err", cerr)
+		}
+	}()
+	logger.Info("БД готова", "db_path", cfg.DBPath)
+
+	// --- Retention в фоне ---
+	retentionPolicy := storage.RetentionPolicy{
+		Messages: cfg.SMSRetention,
+	}
+	go store.RunRetention(ctx, retentionPolicy, logger)
+
+	// TODO(итерация 3+): modem, service, api, webui, notify.
 	logger.Info("инициализация (заглушка), ожидаю сигнала остановки")
 
 	<-ctx.Done()
 	logger.Info("получен сигнал остановки, выхожу")
 	return nil
 }
+
+// ensureDir создаёт родительский каталог для файла БД, если его нет.
+// Для ":memory:" ничего не делает.
+func ensureDir(dbPath string) error {
+	if dbPath == ":memory:" || dbPath == "" {
+		return nil
+	}
+	dir := filepath.Dir(dbPath)
+	if dir == "" || dir == "." {
+		return nil
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("создание каталога %q: %w", dir, err)
+	}
+	return nil
+}
+
+// Проверим, что slog импортирован (используется в RetantionPolicy).
+var _ = slog.LevelInfo
