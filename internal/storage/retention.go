@@ -2,10 +2,10 @@
 package storage
 
 import (
-    "context"
-    "io"
-    "log/slog"
-    "time"
+	"context"
+	"io"
+	"log/slog"
+	"time"
 )
 
 // RetentionPolicy — правила очистки.
@@ -64,8 +64,8 @@ func (s *Store) RunRetention(ctx context.Context, policy RetentionPolicy, logger
 
 func (s *Store) runRetentionOnce(ctx context.Context, policy RetentionPolicy, logger *slog.Logger) {
 	if logger == nil {
-	    logger = slog.New(slog.NewTextHandler(io.Discard, nil))
-	}	// Сообщения.
+		logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+	} // Сообщения.
 	if policy.Messages > 0 {
 		cutoff := nowUTC().Add(-policy.Messages)
 		res, err := s.db.ExecContext(ctx,

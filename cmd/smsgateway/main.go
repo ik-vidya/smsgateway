@@ -242,6 +242,11 @@ func runService(_ *cobra.Command, _ []string) error {
 			}
 		}()
 
+		// PIN SIM-карты, если задан в конфиге.
+		if cfg.ModemPIN != "" {
+			m.SetPIN(cfg.ModemPIN)
+		}
+
 		svc = service.New(m, store, logger, service.Config{
 			DeleteAfterRead: cfg.SMSDeleteAfterRead,
 			ReferenceTTL:    0,

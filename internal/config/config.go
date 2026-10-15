@@ -24,6 +24,7 @@ type Config struct {
 	ModemCmdTimeout    time.Duration
 	ModemProfile       string
 	ModemStorage       string
+	ModemPIN           string
 	SMSDeleteAfterRead bool
 
 	// Storage
@@ -65,21 +66,22 @@ func Load(path string) (*Config, error) {
 	}
 
 	c := &Config{
-		HTTPAddr:           envDefault("HTTP_ADDR", "127.0.0.1:8080"),
-		SerialPort:         os.Getenv("SERIAL_PORT"),
-		ModemProfile:       envDefault("MODEM_PROFILE", "generic"),
-		ModemStorage:       os.Getenv("MODEM_STORAGE"),
-		DBPath:             os.Getenv("DB_PATH"),
-		FilesBackendDir:    os.Getenv("FILES_BACKEND_DIR"),
-		GammuImportDir:     os.Getenv("GAMMU_IMPORT_DIR"),
-		LogLevel:           envDefault("LOG_LEVEL", "info"),
-		LogFormat:          envDefault("LOG_FORMAT", "text"),
-		SelfNumber:         os.Getenv("SELF_NUMBER"),
-		TelegramBotToken:   os.Getenv("TELEGRAM_BOT_TOKEN"),
-		TelegramChatID:     os.Getenv("TELEGRAM_CHAT_ID"),
-		WebUIAddr:          envDefault("WEBUI_ADDR", "127.0.0.1:8081"),
-		WebUIAuthMode:      envDefault("WEBUI_AUTH_MODE", "none"),
-		WebUIDefaultLang:   envDefault("WEBUI_DEFAULT_LANG", "en"),
+		HTTPAddr:         envDefault("HTTP_ADDR", "127.0.0.1:8080"),
+		SerialPort:       os.Getenv("SERIAL_PORT"),
+		ModemProfile:     envDefault("MODEM_PROFILE", "generic"),
+		ModemStorage:     os.Getenv("MODEM_STORAGE"),
+		ModemPIN:         os.Getenv("MODEM_PIN"),
+		DBPath:           os.Getenv("DB_PATH"),
+		FilesBackendDir:  os.Getenv("FILES_BACKEND_DIR"),
+		GammuImportDir:   os.Getenv("GAMMU_IMPORT_DIR"),
+		LogLevel:         envDefault("LOG_LEVEL", "info"),
+		LogFormat:        envDefault("LOG_FORMAT", "text"),
+		SelfNumber:       os.Getenv("SELF_NUMBER"),
+		TelegramBotToken: os.Getenv("TELEGRAM_BOT_TOKEN"),
+		TelegramChatID:   os.Getenv("TELEGRAM_CHAT_ID"),
+		WebUIAddr:        envDefault("WEBUI_ADDR", "127.0.0.1:8081"),
+		WebUIAuthMode:    envDefault("WEBUI_AUTH_MODE", "none"),
+		WebUIDefaultLang: envDefault("WEBUI_DEFAULT_LANG", "en"),
 	}
 
 	c.APIKeys = splitNonEmpty(os.Getenv("API_KEYS"), ",")
@@ -141,6 +143,20 @@ func (c *Config) validate() error {
 		errs = append(errs, fmt.Errorf(
 			"MODEM_STORAGE должен быть ME, SM или пуст, получено %q",
 			c.ModemStorage))
+	}
+	if c.ModemPIN != "" {
+		if len(c.ModemPIN) < 4 || len(c.ModemPIN) > 8 {
+			errs = append(errs, fmt.Errorf(
+				"MODEM_PIN должен быть 4-8 цифр, получено %d",
+				len(c.ModemPIN)))
+		}
+		for _, r := range c.ModemPIN {
+			if r < '0' || r > '9' {
+				errs = append(errs, fmt.Errorf(
+					"MODEM_PIN должен содержать только цифры"))
+				break
+			}
+		}
 	}
 	switch strings.ToLower(c.LogLevel) {
 	case "debug", "info", "warn", "warning", "error":

@@ -97,7 +97,7 @@ func TestModemInitWithSIM800(t *testing.T) {
 	mock.PushResponse("AT+CGSN", "863584038586060", "OK")
 
 	// PreInitHook профиля SIM800 — ожидаемые команды.
-	mock.PushResponse("AT+CFUN?", "+CFUN: 1", "OK")       // уже включён
+	mock.PushResponse("AT+CFUN?", "+CFUN: 1", "OK") // уже включён
 	mock.PushResponse(`AT+CPMS="SM","SM","SM"`, "OK")
 	mock.PushResponse("AT+CNMI=2,1,0,1,0", "OK")
 	mock.PushResponse("AT+CSMP=49,167,0,0", "OK")

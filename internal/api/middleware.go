@@ -13,8 +13,9 @@ import (
 // withAuth проверяет API-ключ. Пропускает запрос, если ключ валиден.
 //
 // Принимает:
-//   X-API-Key: <key>
-//   Authorization: Bearer <key>
+//
+//	X-API-Key: <key>
+//	Authorization: Bearer <key>
 //
 // Сравнение — constant-time.
 func (s *Server) withAuth(next http.Handler) http.Handler {

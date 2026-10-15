@@ -115,8 +115,8 @@ type ModemStatus struct {
 	Model        string `json:"model,omitempty"`
 	Revision     string `json:"revision,omitempty"`
 	IMEI         string `json:"imei,omitempty"`
-	Signal       int    `json:"signal"`       // rssi 0..31, 0 если неизвестно
-	Network      int    `json:"network"`      // CREG stat
+	Signal       int    `json:"signal"`  // rssi 0..31, 0 если неизвестно
+	Network      int    `json:"network"` // CREG stat
 	NetworkText  string `json:"network_text,omitempty"`
 }
 

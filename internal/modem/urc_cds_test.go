@@ -96,14 +96,14 @@ func TestURCCDSWithoutPDU(t *testing.T) {
 func TestIsHexLine(t *testing.T) {
 	cases := map[string]bool{
 		"0691735205991106B30B917352651999F9620131220473216201312204042100": true,
-		"00AA":    true,
-		"00aa":    true,
-		"0":       false,
-		"00A":     false,
-		"00AG":    false,
-		"+CPIN":   false,
-		"OK":      false,
-		"":        false,
+		"00AA":  true,
+		"00aa":  true,
+		"0":     false,
+		"00A":   false,
+		"00AG":  false,
+		"+CPIN": false,
+		"OK":    false,
+		"":      false,
 	}
 	for in, want := range cases {
 		if got := isHexLine(in); got != want {

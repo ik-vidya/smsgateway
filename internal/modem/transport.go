@@ -126,7 +126,7 @@ func (a *ATTransport) exec(ctx context.Context, cmd string, payload []byte, wait
 
 	a.drainRespCh()
 
-	a.cfg.Logger.Debug("AT →", "cmd", cmd)
+	a.cfg.Logger.Debug("AT →", "cmd", maskPINCommand(cmd))
 	if err := a.writeString(cmd + "\r"); err != nil {
 		return Response{}, fmt.Errorf("запись команды %q: %w", cmd, err)
 	}
@@ -383,4 +383,14 @@ func (a *ATTransport) drainRespCh() {
 			return
 		}
 	}
+}
+
+// maskPINCommand маскирует PIN в AT+CPIN="<pin>" для логов.
+// В остальных командах возвращает исходную строку.
+func maskPINCommand(cmd string) string {
+	const prefix = `AT+CPIN="`
+	if strings.HasPrefix(cmd, prefix) {
+		return `AT+CPIN="****"`
+	}
+	return cmd
 }

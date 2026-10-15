@@ -83,10 +83,6 @@ Middleware: `withAuth` (constant-time), `withLogging`, `withRecover`.
    уже работает (`pdu.Decode` + `storage.SavePendingPart`),
    отправка — нет.
 
-5. **PIN SIM-карты.** `MODEM_PIN` в конфиге, `AT+CPIN="<pin>"`
-   при старте, обработка `+CPIN: SIM PIN` и `+CME ERROR: 11`.
-   Защита от «последней попытки» через `AT+SPIC` (для SIM800).
-
 ---
 
 ## Другие запланированные задачи

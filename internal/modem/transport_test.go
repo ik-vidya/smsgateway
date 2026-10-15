@@ -239,9 +239,9 @@ func TestParseNonURC(t *testing.T) {
 
 func TestInterpretErrorLine(t *testing.T) {
 	cases := map[string]string{
-		"+CME ERROR: 10":  "SIM not inserted",
-		"+CMS ERROR: 500": "нет баланса",
-		"+CMS ERROR: 2171": "нет сети",
+		"+CME ERROR: 10":                "SIM not inserted",
+		"+CMS ERROR: 500":               "нет баланса",
+		"+CMS ERROR: 2171":              "нет сети",
 		"+CMS ERROR: Temporary failure": "SMSC недоступен",
 	}
 	for in, want := range cases {
@@ -255,63 +255,62 @@ func TestInterpretErrorLine(t *testing.T) {
 // ==================== ExecPrompt ====================
 
 func TestExecPromptOK(t *testing.T) {
-    at, mock := newTestTransport(t)
+	at, mock := newTestTransport(t)
 
-    // Модем: "\r\n> " без \n, потом после payload вернёт +CMGS и OK.
-    // Мы не можем разделить два ответа через mock по команде,
-    // потому что mock срабатывает на Write целиком. Придётся
-    // объединить: на Write "AT+CMGS=25\r" отдать "> " без \n,
-    // а payload обрабатываем отдельно.
-    // Проще: push-нуть оба ответа на первый Write.
-    mock.PushResponse("AT+CMGS=25",
-	"> ", // это отдастся после первого Write
-	"+CMGS: 42",
-	"OK",
-    )
+	// Модем: "\r\n> " без \n, потом после payload вернёт +CMGS и OK.
+	// Мы не можем разделить два ответа через mock по команде,
+	// потому что mock срабатывает на Write целиком. Придётся
+	// объединить: на Write "AT+CMGS=25\r" отдать "> " без \n,
+	// а payload обрабатываем отдельно.
+	// Проще: push-нуть оба ответа на первый Write.
+	mock.PushResponse("AT+CMGS=25",
+		"> ", // это отдастся после первого Write
+		"+CMGS: 42",
+		"OK",
+	)
 
-    resp, err := at.ExecPrompt(context.Background(), "AT+CMGS=25",
-	[]byte("0011AA\r\x1a"))
-    if err != nil {
-	t.Fatalf("ExecPrompt: %v", err)
-    }
-    if !resp.OK() {
-	t.Fatalf("не OK: %+v", resp)
-    }
-    // Проверим, что +CMGS: 42 в payload.
-    found := false
-    for _, l := range resp.Payload() {
-	if l == "+CMGS: 42" {
-	    found = true
+	resp, err := at.ExecPrompt(context.Background(), "AT+CMGS=25",
+		[]byte("0011AA\r\x1a"))
+	if err != nil {
+		t.Fatalf("ExecPrompt: %v", err)
 	}
-    }
-    if !found {
-	t.Errorf("+CMGS: 42 не найден: %v", resp.Lines)
-    }
+	if !resp.OK() {
+		t.Fatalf("не OK: %+v", resp)
+	}
+	// Проверим, что +CMGS: 42 в payload.
+	found := false
+	for _, l := range resp.Payload() {
+		if l == "+CMGS: 42" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("+CMGS: 42 не найден: %v", resp.Lines)
+	}
 }
 
 func TestExecPromptErrorBeforePrompt(t *testing.T) {
-    at, mock := newTestTransport(t)
-    mock.PushResponse("AT+CMGS=999", "+CMS ERROR: 500")
+	at, mock := newTestTransport(t)
+	mock.PushResponse("AT+CMGS=999", "+CMS ERROR: 500")
 
-    _, err := at.ExecPrompt(context.Background(), "AT+CMGS=999",
-	[]byte("ignored"))
-    if err == nil {
-	t.Fatal("ожидалась ошибка")
-    }
+	_, err := at.ExecPrompt(context.Background(), "AT+CMGS=999",
+		[]byte("ignored"))
+	if err == nil {
+		t.Fatal("ожидалась ошибка")
+	}
 }
 
 func TestIsPrompt(t *testing.T) {
-    if !isPrompt("> ") {
-	t.Error("'> ' должен быть prompt")
-    }
-    if !isPrompt(">") {
-	t.Error("'>' должен быть prompt")
-    }
-    if isPrompt(">> ") {
-	t.Error("'>> ' не prompt")
-    }
-    if isPrompt("OK") {
-	t.Error("'OK' не prompt")
-    }
+	if !isPrompt("> ") {
+		t.Error("'> ' должен быть prompt")
+	}
+	if !isPrompt(">") {
+		t.Error("'>' должен быть prompt")
+	}
+	if isPrompt(">> ") {
+		t.Error("'>> ' не prompt")
+	}
+	if isPrompt("OK") {
+		t.Error("'OK' не prompt")
+	}
 }
-

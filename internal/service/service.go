@@ -371,57 +371,57 @@ func (s *Service) processQueue(ctx context.Context) {
 // пишет первый — для отображения. Остальные живут в
 // pending_references до прихода DR или TTL.
 func (s *Service) sendOne(ctx context.Context, msg *storage.Message) {
-    s.logger.Info("service: отправка",
-	"id", msg.ID, "peer", msg.Peer)
+	s.logger.Info("service: отправка",
+		"id", msg.ID, "peer", msg.Peer)
 
-    // 1. Пометить sending.
-    if err := s.store.MarkSending(ctx, msg.ID); err != nil {
-	s.logger.Error("service: MarkSending", "err", err, "id", msg.ID)
-	return
-    }
-
-    // 2. Отправить с retry.
-    res, attempts, err := s.sendWithRetry(ctx, msg)
-    if err != nil {
-	s.logger.Warn("service: SendSMS не удалось",
-	    "id", msg.ID, "attempts", attempts,
-	    "parts_sent", len(res.References),
-	    "err", err)
-	_ = s.store.MarkFailed(ctx, msg.ID, err.Error())
-	return
-    }
-
-    // 3. Собрать список references. Для обратной совместимости, если
-    // References пуст, но Reference задан — используем его.
-    refs := res.References
-    if len(refs) == 0 && res.Reference != 0 {
-	refs = []int64{res.Reference}
-    }
-    if len(refs) == 0 {
-	s.logger.Error("service: SendSMS вернул пустой References",
-	    "id", msg.ID)
-	_ = s.store.MarkFailed(ctx, msg.ID, "нет reference от модема")
-	return
-    }
-
-    // 4. Забронировать все reference на это сообщение.
-    for _, ref := range refs {
-	if err := s.store.ReserveReference(ctx, ref, msg.ID, s.refTTL); err != nil {
-	    s.logger.Warn("service: не удалось забронировать reference",
-		"ref", ref, "id", msg.ID, "err", err)
+	// 1. Пометить sending.
+	if err := s.store.MarkSending(ctx, msg.ID); err != nil {
+		s.logger.Error("service: MarkSending", "err", err, "id", msg.ID)
+		return
 	}
-    }
 
-    // 5. Пометить sent с первым reference.
-    if err := s.store.MarkSent(ctx, msg.ID, refs[0]); err != nil {
-	s.logger.Error("service: MarkSent", "err", err, "id", msg.ID)
-	return
-    }
-    s.logger.Info("service: SMS отправлено",
-	"id", msg.ID,
-	"parts", len(refs),
-	"refs", refs,
-	"attempts", attempts)
+	// 2. Отправить с retry.
+	res, attempts, err := s.sendWithRetry(ctx, msg)
+	if err != nil {
+		s.logger.Warn("service: SendSMS не удалось",
+			"id", msg.ID, "attempts", attempts,
+			"parts_sent", len(res.References),
+			"err", err)
+		_ = s.store.MarkFailed(ctx, msg.ID, err.Error())
+		return
+	}
+
+	// 3. Собрать список references. Для обратной совместимости, если
+	// References пуст, но Reference задан — используем его.
+	refs := res.References
+	if len(refs) == 0 && res.Reference != 0 {
+		refs = []int64{res.Reference}
+	}
+	if len(refs) == 0 {
+		s.logger.Error("service: SendSMS вернул пустой References",
+			"id", msg.ID)
+		_ = s.store.MarkFailed(ctx, msg.ID, "нет reference от модема")
+		return
+	}
+
+	// 4. Забронировать все reference на это сообщение.
+	for _, ref := range refs {
+		if err := s.store.ReserveReference(ctx, ref, msg.ID, s.refTTL); err != nil {
+			s.logger.Warn("service: не удалось забронировать reference",
+				"ref", ref, "id", msg.ID, "err", err)
+		}
+	}
+
+	// 5. Пометить sent с первым reference.
+	if err := s.store.MarkSent(ctx, msg.ID, refs[0]); err != nil {
+		s.logger.Error("service: MarkSent", "err", err, "id", msg.ID)
+		return
+	}
+	s.logger.Info("service: SMS отправлено",
+		"id", msg.ID,
+		"parts", len(refs),
+		"refs", refs,
+		"attempts", attempts)
 }
 
 // sendWithRetry вызывает SendSMS до s.sendMaxAttempts раз, пока

@@ -37,6 +37,7 @@ type Modem struct {
 	logger    Logger
 
 	mu   sync.RWMutex
+	pin  string
 	info Info
 }
 
@@ -98,6 +99,11 @@ func (m *Modem) Init(ctx context.Context) error {
 		info.IMEI = firstPayload(resp)
 	}
 	m.setInfo(info)
+
+	// 5. Проверка PIN SIM-карты.
+	if err := m.unlockSIM(ctx); err != nil {
+		return fmt.Errorf("разблокировка SIM: %w", err)
+	}
 
 	m.logger.Info("modem: идентификация",
 		"manufacturer", info.Manufacturer,

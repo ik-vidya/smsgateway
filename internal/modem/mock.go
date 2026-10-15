@@ -2,8 +2,12 @@
 //
 // Реализован через sync.Cond + bytes.Buffer. Reader блокируется на
 // cond.Wait() до появления данных. Писатель добавляет данные и
-// вызывает cond.Broadcast(). Все записи в порт дополнительно
-// копятся в writeBuf для проверки в тестах через WrittenBytes().
+// вызывает cond.Broadcast(). Все записи в порт копятся в writeBuf
+// для проверки в тестах через WrittenBytes().
+//
+// Если на AT+CPIN? не задан явный ответ через PushResponse,
+// возвращается «+CPIN: READY». Это упрощает тесты, которые не
+// занимаются PIN-логикой, но вызывают Init (и unlockSIM внутри).
 package modem
 
 import (
@@ -24,13 +28,9 @@ type MockTransport struct {
 }
 
 type mockResponse struct {
-	// matchCmd — команда (без \r), при получении которой отдать
-	// эту порцию ответа. Пусто = отдать при следующей записи.
 	matchCmd string
-	// lines — строки ответа (без \r\n).
-	lines []string
-	// delayMs — задержка перед отправкой (мс).
-	delayMs int
+	lines    []string
+	delayMs  int
 }
 
 // NewMock создаёт mock-транспорт без ответов.
@@ -81,13 +81,10 @@ func (m *MockTransport) Read(p []byte) (int, error) {
 
 // Write принимает команду и подбирает ответ по скрипту.
 //
-// Сначала ищет точное совпадение по matchCmd, затем первый
-// unsolicited (matchCmd == "").
-//
-// ВАЖНО: found копируется по значению (а не по указателю на элемент
-// slice), потому что append(m.script[:i], m.script[i+1:]...) сдвигает
-// элементы in-place, и указатель на m.script[i] после этого указывает
-// уже на другой ответ.
+// Порядок поиска:
+//  1. точное совпадение по matchCmd;
+//  2. первый unsolicited (matchCmd == "");
+//  3. fallback для AT+CPIN? — «+CPIN: READY», если явного ответа нет.
 func (m *MockTransport) Write(p []byte) (int, error) {
 	cmd := string(bytes.TrimRight(p, "\r\n"))
 
@@ -111,7 +108,7 @@ func (m *MockTransport) Write(p []byte) (int, error) {
 			break
 		}
 	}
-	// 2. Если нет — первый unsolicited.
+	// 2. Первый unsolicited.
 	if !foundOK {
 		for i := range m.script {
 			r := m.script[i]
@@ -122,6 +119,14 @@ func (m *MockTransport) Write(p []byte) (int, error) {
 				break
 			}
 		}
+	}
+	// 3. Fallback для AT+CPIN?.
+	if !foundOK && cmd == "AT+CPIN?" {
+		found = mockResponse{
+			matchCmd: "AT+CPIN?",
+			lines:    []string{"+CPIN: READY", "OK"},
+		}
+		foundOK = true
 	}
 	m.mu.Unlock()
 
@@ -149,7 +154,6 @@ func (m *MockTransport) deliver(r mockResponse) {
 }
 
 // Close помечает mock закрытым и будит читателя.
-// Reader после этого получит io.EOF.
 func (m *MockTransport) Close() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -162,8 +166,6 @@ func (m *MockTransport) Close() error {
 }
 
 // WrittenBytes возвращает всё, что было записано в порт.
-// Полезно в тестах для проверки, что определённая AT-команда
-// была отправлена.
 func (m *MockTransport) WrittenBytes() []byte {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -171,10 +173,8 @@ func (m *MockTransport) WrittenBytes() []byte {
 }
 
 // ResetWritten очищает историю записей в порт.
-// Полезно в тестах, когда нужно проверить только последующие команды.
 func (m *MockTransport) ResetWritten() {
-    m.mu.Lock()
-    defer m.mu.Unlock()
-    m.writeBuf.Reset()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.writeBuf.Reset()
 }
-

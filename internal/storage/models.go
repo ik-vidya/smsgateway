@@ -19,15 +19,17 @@ const (
 // Status — статус сообщения.
 //
 // Для direction=out:
-//   queued    — принято API, лежит в очереди
-//   sending   — началась отправка через AT+CMGS
-//   sent      — модем подтвердил +CMGS: <ref>, ждём DR
-//   delivered — пришёл DR с TP-ST=0x00
-//   failed    — ошибка модема, таймаут или DR с TP-ST≠0
-//   sent_no_dr — sent + истёк DR_WAIT_TIMEOUT, DR так и не пришёл
+//
+//	queued    — принято API, лежит в очереди
+//	sending   — началась отправка через AT+CMGS
+//	sent      — модем подтвердил +CMGS: <ref>, ждём DR
+//	delivered — пришёл DR с TP-ST=0x00
+//	failed    — ошибка модема, таймаут или DR с TP-ST≠0
+//	sent_no_dr — sent + истёк DR_WAIT_TIMEOUT, DR так и не пришёл
 //
 // Для direction=in:
-//   received  — SMS прочитана из модема и сохранена
+//
+//	received  — SMS прочитана из модема и сохранена
 type Status string
 
 const (
