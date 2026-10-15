@@ -4,14 +4,15 @@ package main
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"syscall"
+	"time"
 
 	"github.com/spf13/cobra"
 
+	"github.com/ik-vidya/smsgateway/internal/api"
 	"github.com/ik-vidya/smsgateway/internal/config"
 	"github.com/ik-vidya/smsgateway/internal/logging"
 	"github.com/ik-vidya/smsgateway/internal/storage"
@@ -175,11 +176,31 @@ func runService(_ *cobra.Command, _ []string) error {
 	}
 	go store.RunRetention(ctx, retentionPolicy, logger)
 
-	// TODO(итерация 3+): modem, service, api, webui, notify.
-	logger.Info("инициализация (заглушка), ожидаю сигнала остановки")
+	// --- HTTP API ---
+	apiServer := api.New(cfg, store, logger)
 
-	<-ctx.Done()
-	logger.Info("получен сигнал остановки, выхожу")
+	serverErr := make(chan error, 1)
+	go func() {
+		serverErr <- apiServer.Start()
+	}()
+
+	// --- Ожидание сигнала остановки или падения сервера ---
+	select {
+	case <-ctx.Done():
+		logger.Info("получен сигнал остановки")
+		shutdownCtx, cancel := context.WithTimeout(
+			context.Background(), 10*time.Second)
+		defer cancel()
+		if err := apiServer.Shutdown(shutdownCtx); err != nil {
+			logger.Error("shutdown api", "err", err)
+		}
+	case err := <-serverErr:
+		if err != nil {
+			return fmt.Errorf("http server: %w", err)
+		}
+	}
+
+	logger.Info("остановлен")
 	return nil
 }
 
@@ -198,6 +219,3 @@ func ensureDir(dbPath string) error {
 	}
 	return nil
 }
-
-// Проверим, что slog импортирован (используется в RetantionPolicy).
-var _ = slog.LevelInfo
