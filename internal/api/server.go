@@ -19,17 +19,13 @@ import (
 type Server struct {
 	cfg       *config.Config
 	store     *storage.Store
-	svc       *service.Service // может быть nil (в тестах)
+	svc       *service.Service
 	logger    *slog.Logger
 	http      *http.Server
 	startTime time.Time
 }
 
 // New создаёт сервер с готовыми маршрутами.
-//
-// svc может быть nil — тогда /api/v1/status отдаст часть данных
-// (uptime берётся из самого сервера, modem-информация отсутствует).
-// Это удобно для юнит-тестов, где service не нужен.
 func New(cfg *config.Config, store *storage.Store, svc *service.Service, logger *slog.Logger) *Server {
 	s := &Server{
 		cfg:       cfg,
@@ -38,12 +34,23 @@ func New(cfg *config.Config, store *storage.Store, svc *service.Service, logger 
 		logger:    logger,
 		startTime: time.Now(),
 	}
+
+	// WriteTimeout должен быть больше TEST_SMS_TIMEOUT, иначе
+	// синхронный /test-sms отвалится раньше, чем сервис ответит.
+	writeTimeout := 5 * time.Minute
+	if cfg.TestSMSTimeout > 0 {
+		wt := cfg.TestSMSTimeout + 30*time.Second
+		if wt > writeTimeout {
+			writeTimeout = wt
+		}
+	}
+
 	s.http = &http.Server{
 		Addr:              cfg.HTTPAddr,
 		Handler:           s.routes(),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
-		WriteTimeout:      30 * time.Second,
+		WriteTimeout:      writeTimeout,
 		IdleTimeout:       60 * time.Second,
 	}
 	return s
@@ -74,16 +81,16 @@ func (s *Server) Shutdown(ctx context.Context) error {
 func (s *Server) routes() http.Handler {
 	mux := http.NewServeMux()
 
-	// Публичные эндпоинты (без авторизации).
 	mux.HandleFunc("GET /healthz", s.handleHealthz)
 
-	// Защищённые эндпоинты.
 	protected := http.NewServeMux()
 	protected.HandleFunc("GET /api/v1/status", s.handleStatus)
 	protected.HandleFunc("POST /api/v1/messages", s.handleSendMessage)
 	protected.HandleFunc("GET /api/v1/messages", s.handleListMessages)
 	protected.HandleFunc("GET /api/v1/messages/{id}", s.handleGetMessage)
 	protected.HandleFunc("DELETE /api/v1/messages/{id}", s.handleDeleteMessage)
+	protected.HandleFunc("POST /api/v1/test-sms", s.handleTestSMS)
+	protected.HandleFunc("GET /api/v1/diagnostics", s.handleDiagnostics)
 
 	mux.Handle("/api/v1/", s.withAuth(protected))
 

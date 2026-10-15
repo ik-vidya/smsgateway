@@ -29,7 +29,6 @@ type MessageDTO struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// toMessageDTO конвертирует storage.Message в DTO.
 func toMessageDTO(m *storage.Message) MessageDTO {
 	dto := MessageDTO{
 		ID:         m.ID,
@@ -103,10 +102,6 @@ type DBStatus struct {
 }
 
 // ModemStatus — состояние модема.
-//
-// Configured=false — модем не сконфигурирован (SERIAL_PORT пуст или
-// "none"); в этом случае остальные поля пусты, и сервис работает
-// в режиме "без модема".
 type ModemStatus struct {
 	Configured   bool   `json:"configured"`
 	Port         string `json:"port,omitempty"`
@@ -115,12 +110,11 @@ type ModemStatus struct {
 	Model        string `json:"model,omitempty"`
 	Revision     string `json:"revision,omitempty"`
 	IMEI         string `json:"imei,omitempty"`
-	Signal       int    `json:"signal"`  // rssi 0..31, 0 если неизвестно
-	Network      int    `json:"network"` // CREG stat
+	Signal       int    `json:"signal"`
+	Network      int    `json:"network"`
 	NetworkText  string `json:"network_text,omitempty"`
 }
 
-// networkStatusText расшифровывает CREG-статус.
 func networkStatusText(stat int) string {
 	switch stat {
 	case 0:
@@ -137,4 +131,20 @@ func networkStatusText(stat int) string {
 		return "зарегистрирован (роуминг)"
 	}
 	return ""
+}
+
+// TestSMSRequest — тело POST /api/v1/test-sms.
+type TestSMSRequest struct {
+	Text string `json:"text,omitempty"`
+}
+
+// TestSMSResponse — ответ POST /api/v1/test-sms.
+type TestSMSResponse struct {
+	ID          int64      `json:"id"`
+	Status      string     `json:"status"`
+	Reference   *int64     `json:"reference,omitempty"`
+	SentAt      *time.Time `json:"sent_at,omitempty"`
+	DeliveredAt *time.Time `json:"delivered_at,omitempty"`
+	Error       string     `json:"error,omitempty"`
+	TimedOut    bool       `json:"timed_out,omitempty"`
 }

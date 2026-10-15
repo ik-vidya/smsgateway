@@ -23,13 +23,11 @@ import (
 	"github.com/ik-vidya/smsgateway/internal/storage"
 )
 
-// Версия и время сборки подставляются через -ldflags.
 var (
 	version   = "dev"
 	buildTime = "unknown"
 )
 
-// Глобальные флаги (persistent).
 var (
 	flagConfig      string
 	flagShowVersion bool
@@ -42,7 +40,6 @@ func main() {
 	}
 }
 
-// rootCmd — корневая команда. Без подкоманды запускает сервис.
 var rootCmd = &cobra.Command{
 	Use:   "smsgateway",
 	Short: "SMS-шлюз для AT-совместимых GSM-модемов",
@@ -78,7 +75,6 @@ func init() {
 	)
 }
 
-// cmdVersion — подкоманда `smsgateway version`.
 func cmdVersion() *cobra.Command {
 	return &cobra.Command{
 		Use:   "version",
@@ -93,7 +89,6 @@ func printVersion() {
 	fmt.Printf("smsgateway %s (сборка %s)\n", version, buildTime)
 }
 
-// cmdListPorts — подкоманда `smsgateway list-ports`.
 func cmdListPorts() *cobra.Command {
 	return &cobra.Command{
 		Use:   "list-ports",
@@ -115,14 +110,11 @@ func cmdListPorts() *cobra.Command {
 	}
 }
 
-// cmdMigrate — подкоманда `smsgateway migrate`.
 func cmdMigrate() *cobra.Command {
 	return &cobra.Command{
 		Use:   "migrate",
 		Short: "Применить миграции БД и выйти",
-		Long: `Открывает базу данных из конфига, применяет неприменённые
-миграции и завершается. Идемпотентна: повторный запуск безопасен.`,
-		RunE: runMigrate,
+		RunE:  runMigrate,
 	}
 }
 
@@ -157,7 +149,6 @@ func runMigrate(_ *cobra.Command, _ []string) error {
 	return nil
 }
 
-// runService запускает основной сервис.
 func runService(_ *cobra.Command, _ []string) error {
 	if flagShowVersion {
 		printVersion()
@@ -187,7 +178,6 @@ func runService(_ *cobra.Command, _ []string) error {
 		syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
-	// --- Инициализация БД ---
 	if err := ensureDir(cfg.DBPath); err != nil {
 		return err
 	}
@@ -202,18 +192,18 @@ func runService(_ *cobra.Command, _ []string) error {
 	}()
 	logger.Info("БД готова", "db_path", cfg.DBPath)
 
-	// --- Retention в фоне ---
 	retentionPolicy := storage.RetentionPolicy{
 		Messages: cfg.SMSRetention,
 	}
 	go store.RunRetention(ctx, retentionPolicy, logger)
 
-	// --- Инициализация модема (или режим без модема) ---
 	var svc *service.Service
 	if cfg.SerialPort == "" || cfg.SerialPort == "none" {
 		logger.Warn("модем не сконфигурирован (SERIAL_PORT пуст) — режим без модема")
 		svc = service.New(nopModem{}, store, logger, service.Config{
 			DeleteAfterRead: cfg.SMSDeleteAfterRead,
+			SelfNumber:      cfg.SelfNumber,
+			TestSMSTimeout:  cfg.TestSMSTimeout,
 		})
 	} else {
 		profile, err := profiles.Get(cfg.ModemProfile)
@@ -242,31 +232,28 @@ func runService(_ *cobra.Command, _ []string) error {
 			}
 		}()
 
-		// PIN SIM-карты, если задан в конфиге.
 		if cfg.ModemPIN != "" {
 			m.SetPIN(cfg.ModemPIN)
 		}
 
 		svc = service.New(m, store, logger, service.Config{
 			DeleteAfterRead: cfg.SMSDeleteAfterRead,
-			ReferenceTTL:    0,
+			SelfNumber:      cfg.SelfNumber,
+			TestSMSTimeout:  cfg.TestSMSTimeout,
 		})
 	}
 
-	// --- Сервис в фоне ---
 	svcErr := make(chan error, 1)
 	go func() {
 		svcErr <- svc.Run(ctx)
 	}()
 
-	// --- HTTP API ---
 	apiServer := api.New(cfg, store, svc, logger)
 	serverErr := make(chan error, 1)
 	go func() {
 		serverErr <- apiServer.Start()
 	}()
 
-	// --- Ожидание сигнала остановки или падения одной из горутин ---
 	select {
 	case <-ctx.Done():
 		logger.Info("получен сигнал остановки")
@@ -290,8 +277,6 @@ func runService(_ *cobra.Command, _ []string) error {
 	return nil
 }
 
-// ensureDir создаёт родительский каталог для файла БД, если его нет.
-// Для ":memory:" ничего не делает.
 func ensureDir(dbPath string) error {
 	if dbPath == ":memory:" || dbPath == "" {
 		return nil
@@ -306,11 +291,7 @@ func ensureDir(dbPath string) error {
 	return nil
 }
 
-// ==================== вспомогательное ====================
-
 // nopModem — заглушка для режима "без модема".
-// URCs() возвращает канал, который никогда не закрывается — Run
-// будет ждать ctx.Done().
 type nopModem struct{}
 
 func (nopModem) Init(context.Context) error { return nil }
@@ -328,7 +309,6 @@ func (nopModem) URCs() <-chan modem.URC { return make(chan modem.URC) }
 func (nopModem) Info() modem.Info       { return modem.Info{} }
 func (nopModem) Close() error           { return nil }
 
-// slogAdapter адаптирует *slog.Logger под интерфейс modem.Logger.
 type slogAdapter struct{ l *slog.Logger }
 
 func (a slogAdapter) Debug(msg string, args ...any) { a.l.Debug(msg, args...) }
@@ -336,5 +316,4 @@ func (a slogAdapter) Info(msg string, args ...any)  { a.l.Info(msg, args...) }
 func (a slogAdapter) Warn(msg string, args ...any)  { a.l.Warn(msg, args...) }
 func (a slogAdapter) Error(msg string, args ...any) { a.l.Error(msg, args...) }
 
-// тихо игнорируем io и прочие импорты, если они больше не нужны
 var _ = io.Discard

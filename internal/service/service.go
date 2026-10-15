@@ -1,31 +1,24 @@
 // Package service — сервисный слой smsgateway.
-//
-// Связывает:
-//   - modem (AT-транспорт и высокоуровневые операции);
-//   - storage (SQLite);
-//   - API (который кладёт сообщения в очередь через storage).
-//
-// Запускает фоновые горутины:
-//   - URC-цикл: реакция на +CMTI, +CDS, +CREG/+CGREG, RDY.
-//   - Отправка: выборка queued-сообщений, отправка с retry.
-//   - Просрочка pending_references: перевод в sent_no_dr.
 package service
 
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
 	"time"
 
+	"github.com/ik-vidya/smsgateway/internal/diagnostics"
 	"github.com/ik-vidya/smsgateway/internal/modem"
 	"github.com/ik-vidya/smsgateway/internal/storage"
 )
 
-// Дефолтные параметры retry.
 const (
-	DefaultSendMaxAttempts = 3
+	DefaultSendMaxAttempts   = 3
+	DefaultTestSMSTimeout    = 30 * time.Second
+	DefaultTestSMSPollPeriod = 500 * time.Millisecond
 )
 
 var DefaultSendBackoff = []time.Duration{
@@ -39,17 +32,17 @@ type Service struct {
 	store  *storage.Store
 	logger *slog.Logger
 
-	// Настройки.
 	sendInterval    time.Duration
 	pendingInterval time.Duration
 	refTTL          time.Duration
 	deleteAfterRead bool
 
-	// Retry.
 	sendMaxAttempts int
 	sendBackoff     []time.Duration
 
-	// Состояние.
+	selfNumber     string
+	testSMSTimeout time.Duration
+
 	mu          sync.RWMutex
 	networkStat int
 	lastCSQ     int
@@ -72,29 +65,16 @@ type Modem interface {
 
 // Config — параметры сервиса.
 type Config struct {
-	// SendInterval — как часто проверять очередь queued.
-	// 0 — 1 секунда.
-	SendInterval time.Duration
-
-	// PendingInterval — как часто проверять просроченные
-	// pending_references. 0 — 30 секунд.
+	SendInterval    time.Duration
 	PendingInterval time.Duration
-
-	// ReferenceTTL — время, через которое неподтверждённый
-	// reference считается просроченным. 0 — 1 час.
-	ReferenceTTL time.Duration
-
-	// DeleteAfterRead — удалять ли SMS из памяти модема после
-	// сохранения в БД. true по умолчанию.
+	ReferenceTTL    time.Duration
 	DeleteAfterRead bool
 
-	// SendMaxAttempts — сколько раз пытаться отправить одно SMS.
-	// 0 — DefaultSendMaxAttempts (3).
 	SendMaxAttempts int
+	SendBackoff     []time.Duration
 
-	// SendBackoff — паузы между попытками.
-	// 0 — DefaultSendBackoff ([1s, 5s]).
-	SendBackoff []time.Duration
+	SelfNumber     string
+	TestSMSTimeout time.Duration
 }
 
 func (c Config) withDefaults() Config {
@@ -113,6 +93,9 @@ func (c Config) withDefaults() Config {
 	if len(c.SendBackoff) == 0 {
 		c.SendBackoff = DefaultSendBackoff
 	}
+	if c.TestSMSTimeout <= 0 {
+		c.TestSMSTimeout = DefaultTestSMSTimeout
+	}
 	return c
 }
 
@@ -129,6 +112,8 @@ func New(m Modem, store *storage.Store, logger *slog.Logger, cfg Config) *Servic
 		deleteAfterRead: cfg.DeleteAfterRead,
 		sendMaxAttempts: cfg.SendMaxAttempts,
 		sendBackoff:     cfg.SendBackoff,
+		selfNumber:      cfg.SelfNumber,
+		testSMSTimeout:  cfg.TestSMSTimeout,
 		startTime:       time.Now(),
 	}
 }
@@ -164,9 +149,7 @@ func (s *Service) Run(ctx context.Context) error {
 }
 
 // Uptime — время с момента старта.
-func (s *Service) Uptime() time.Duration {
-	return time.Since(s.startTime)
-}
+func (s *Service) Uptime() time.Duration { return time.Since(s.startTime) }
 
 // NetworkStatus — текущий статус сети.
 func (s *Service) NetworkStatus() int {
@@ -182,13 +165,112 @@ func (s *Service) LastCSQ() int {
 	return s.lastCSQ
 }
 
-// ModemInfo возвращает информацию о модеме (или пустую Info,
-// если модем не сконфигурирован).
+// ModemInfo возвращает информацию о модеме.
 func (s *Service) ModemInfo() modem.Info {
 	if s.modem == nil {
 		return modem.Info{}
 	}
 	return s.modem.Info()
+}
+
+// ==================== SendTestSMS ====================
+
+// TestSMSResult — результат проверочной SMS.
+type TestSMSResult struct {
+	ID          int64
+	Status      storage.Status
+	Reference   int64
+	SentAt      time.Time
+	DeliveredAt time.Time
+	Error       string
+	TimedOut    bool
+}
+
+// SendTestSMS отправляет SMS на selfNumber (SELF_NUMBER из конфига)
+// и ждёт терминального статуса или таймаута.
+func (s *Service) SendTestSMS(ctx context.Context, text string) (TestSMSResult, error) {
+	if s.selfNumber == "" {
+		return TestSMSResult{}, errors.New("SELF_NUMBER не задан в конфиге")
+	}
+	if text == "" {
+		text = "smsgateway selftest " + time.Now().Format("15:04:05")
+	}
+
+	msg := &storage.Message{
+		Direction: storage.DirectionOut,
+		Status:    storage.StatusQueued,
+		Peer:      s.selfNumber,
+		Text:      text,
+	}
+	id, err := s.store.CreateMessage(ctx, msg)
+	if err != nil {
+		return TestSMSResult{}, fmt.Errorf("CreateMessage: %w", err)
+	}
+	s.logger.Info("service: test-sms поставлен в очередь",
+		"id", id, "peer", s.selfNumber)
+
+	return s.waitForTerminal(ctx, id)
+}
+
+func (s *Service) waitForTerminal(ctx context.Context, id int64) (TestSMSResult, error) {
+	deadline := time.Now().Add(s.testSMSTimeout)
+	tick := time.NewTicker(DefaultTestSMSPollPeriod)
+	defer tick.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			m, _ := s.store.GetMessage(context.Background(), id)
+			return resultFromMessage(id, m), ctx.Err()
+		case <-tick.C:
+		}
+
+		m, err := s.store.GetMessage(ctx, id)
+		if err != nil {
+			return TestSMSResult{ID: id}, fmt.Errorf("GetMessage: %w", err)
+		}
+		if m.Status.IsTerminal() {
+			res := resultFromMessage(id, m)
+			s.logger.Info("service: test-sms завершён",
+				"id", id, "status", m.Status)
+			return res, nil
+		}
+		if time.Now().After(deadline) {
+			res := resultFromMessage(id, m)
+			res.TimedOut = true
+			s.logger.Warn("service: test-sms timeout",
+				"id", id, "status", m.Status)
+			return res, nil
+		}
+	}
+}
+
+func resultFromMessage(id int64, m *storage.Message) TestSMSResult {
+	if m == nil {
+		return TestSMSResult{ID: id}
+	}
+	res := TestSMSResult{
+		ID:     id,
+		Status: m.Status,
+		Error:  m.Error,
+	}
+	if m.Reference.Valid {
+		res.Reference = m.Reference.Int64
+	}
+	if m.SentAt.Valid {
+		res.SentAt = m.SentAt.Time
+	}
+	if m.DeliveredAt.Valid {
+		res.DeliveredAt = m.DeliveredAt.Time
+	}
+	return res
+}
+
+// ==================== Diagnostics ====================
+
+// RunDiagnostics собирает диагностику модема.
+func (s *Service) RunDiagnostics(ctx context.Context) (diagnostics.Result, error) {
+	return diagnostics.Collect(ctx, s.modem)
 }
 
 // ==================== URC-цикл ====================
@@ -221,7 +303,6 @@ func (s *Service) handleURC(ctx context.Context, u modem.URC) {
 		if err := s.ingestSMS(ctx, v.Index); err != nil {
 			s.logger.Error("service: ingestSMS", "err", err, "index", v.Index)
 		}
-
 	case modem.URCCDS:
 		s.logger.Info("service: delivery report",
 			"ref", v.Reference, "tpst", v.TPST, "peer", v.Peer)
@@ -234,47 +315,36 @@ func (s *Service) handleURC(ctx context.Context, u modem.URC) {
 			s.logger.Warn("service: HandleDeliveryReport",
 				"ref", v.Reference, "err", err)
 		}
-
 	case modem.URCCREG:
 		s.mu.Lock()
 		s.networkStat = v.Stat
 		s.mu.Unlock()
 		s.logger.Info("service: регистрация",
 			"stat", v.Stat, "lac", v.LAC, "cid", v.CID)
-
 	case modem.URCCGREG:
 		s.logger.Info("service: GPRS-регистрация",
 			"stat", v.Stat, "lac", v.LAC, "cid", v.CID)
-
 	case modem.URCCBC:
 		s.logger.Debug("service: батарея",
 			"percent", v.Percent, "mv", v.MilliV)
-
 	case modem.URCRDY:
 		s.logger.Warn("service: модем перезапустился (RDY)")
-
 	case modem.URCRing:
 		s.logger.Info("service: входящий звонок")
-
 	case modem.URCNoCarrier:
 		s.logger.Info("service: соединение потеряно")
-
 	case modem.URCCUSD:
 		s.logger.Info("service: USSD", "stat", v.Stat, "text", v.Text)
-
 	default:
 		s.logger.Debug("service: неизвестный URC", "kind", u.Kind())
 	}
 }
 
-// ingestSMS читает SMS по индексу из памяти модема, сохраняет в БД
-// и, при настройке, удаляет из памяти.
 func (s *Service) ingestSMS(ctx context.Context, index int) error {
 	msgs, err := s.modem.ReadSMS(ctx, modem.ReadFilter{})
 	if err != nil {
 		return fmt.Errorf("ReadSMS: %w", err)
 	}
-
 	var target *modem.SMSMessage
 	for i := range msgs {
 		if msgs[i].Index == index {
@@ -286,7 +356,6 @@ func (s *Service) ingestSMS(ctx context.Context, index int) error {
 		return fmt.Errorf("SMS с index=%d не найдена", index)
 	}
 
-	// Дедупликация: есть ли уже такое сообщение в БД?
 	existing, _, err := s.store.ListMessages(ctx, storage.Filter{
 		Direction: storage.DirectionIn,
 		Peer:      target.Peer,
@@ -302,7 +371,6 @@ func (s *Service) ingestSMS(ctx context.Context, index int) error {
 		return nil
 	}
 
-	// Сохранить в БД.
 	m := &storage.Message{
 		Direction: storage.DirectionIn,
 		Status:    storage.StatusReceived,
@@ -348,7 +416,6 @@ func (s *Service) sendLoop(ctx context.Context) {
 	}
 }
 
-// processQueue обрабатывает одно сообщение из очереди за раз.
 func (s *Service) processQueue(ctx context.Context) {
 	msgs, _, err := s.store.ListMessages(ctx, storage.Filter{
 		Direction: storage.DirectionOut,
@@ -365,22 +432,15 @@ func (s *Service) processQueue(ctx context.Context) {
 	s.sendOne(ctx, msgs[0])
 }
 
-// sendOne отправляет одно сообщение с retry при транзиентных ошибках.
-//
-// Для multipart бронирует все reference, но в messages.reference
-// пишет первый — для отображения. Остальные живут в
-// pending_references до прихода DR или TTL.
 func (s *Service) sendOne(ctx context.Context, msg *storage.Message) {
 	s.logger.Info("service: отправка",
 		"id", msg.ID, "peer", msg.Peer)
 
-	// 1. Пометить sending.
 	if err := s.store.MarkSending(ctx, msg.ID); err != nil {
 		s.logger.Error("service: MarkSending", "err", err, "id", msg.ID)
 		return
 	}
 
-	// 2. Отправить с retry.
 	res, attempts, err := s.sendWithRetry(ctx, msg)
 	if err != nil {
 		s.logger.Warn("service: SendSMS не удалось",
@@ -391,8 +451,6 @@ func (s *Service) sendOne(ctx context.Context, msg *storage.Message) {
 		return
 	}
 
-	// 3. Собрать список references. Для обратной совместимости, если
-	// References пуст, но Reference задан — используем его.
 	refs := res.References
 	if len(refs) == 0 && res.Reference != 0 {
 		refs = []int64{res.Reference}
@@ -404,7 +462,6 @@ func (s *Service) sendOne(ctx context.Context, msg *storage.Message) {
 		return
 	}
 
-	// 4. Забронировать все reference на это сообщение.
 	for _, ref := range refs {
 		if err := s.store.ReserveReference(ctx, ref, msg.ID, s.refTTL); err != nil {
 			s.logger.Warn("service: не удалось забронировать reference",
@@ -412,21 +469,15 @@ func (s *Service) sendOne(ctx context.Context, msg *storage.Message) {
 		}
 	}
 
-	// 5. Пометить sent с первым reference.
 	if err := s.store.MarkSent(ctx, msg.ID, refs[0]); err != nil {
 		s.logger.Error("service: MarkSent", "err", err, "id", msg.ID)
 		return
 	}
 	s.logger.Info("service: SMS отправлено",
-		"id", msg.ID,
-		"parts", len(refs),
-		"refs", refs,
+		"id", msg.ID, "parts", len(refs), "refs", refs,
 		"attempts", attempts)
 }
 
-// sendWithRetry вызывает SendSMS до s.sendMaxAttempts раз, пока
-// ошибка транзиентная. Возвращает результат, число сделанных
-// попыток и последнюю ошибку.
 func (s *Service) sendWithRetry(ctx context.Context, msg *storage.Message) (modem.SendResult, int, error) {
 	var lastErr error
 	var lastRes modem.SendResult
@@ -440,27 +491,19 @@ func (s *Service) sendWithRetry(ctx context.Context, msg *storage.Message) (mode
 		lastErr = err
 		lastRes = res
 
-		// Постоянная ошибка — прекращаем попытки.
 		if !modem.IsTransientError(err) {
 			s.logger.Warn("service: постоянная ошибка, retry не поможет",
 				"id", msg.ID, "attempt", attempt, "err", err)
 			return res, attempt, err
 		}
-
-		// Последняя попытка — выходим.
 		if attempt >= s.sendMaxAttempts {
 			break
 		}
-
-		// Пауза перед следующей попыткой.
 		wait := s.backoffFor(attempt)
 		if wait > 0 {
 			s.logger.Warn("service: транзиентная ошибка, повтор",
-				"id", msg.ID,
-				"attempt", attempt,
-				"max", s.sendMaxAttempts,
-				"wait", wait,
-				"err", err)
+				"id", msg.ID, "attempt", attempt, "max", s.sendMaxAttempts,
+				"wait", wait, "err", err)
 			select {
 			case <-ctx.Done():
 				return lastRes, attempt, ctx.Err()
@@ -471,8 +514,6 @@ func (s *Service) sendWithRetry(ctx context.Context, msg *storage.Message) (mode
 	return lastRes, s.sendMaxAttempts, lastErr
 }
 
-// backoffFor возвращает паузу перед попыткой attempt+1.
-// attempt — номер уже сделанной попытки (1-based).
 func (s *Service) backoffFor(attempt int) time.Duration {
 	idx := attempt - 1
 	if idx < 0 || idx >= len(s.sendBackoff) {
@@ -502,8 +543,6 @@ func (s *Service) pendingLoop(ctx context.Context) {
 	}
 }
 
-// processExpiredReferences переводит сообщения, для которых DR так
-// и не пришёл, в статус sent_no_dr.
 func (s *Service) processExpiredReferences(ctx context.Context) {
 	expired, err := s.store.ExpirePendingReferences(ctx)
 	if err != nil {
@@ -522,8 +561,6 @@ func (s *Service) processExpiredReferences(ctx context.Context) {
 
 // ==================== Delivery reports ====================
 
-// HandleDeliveryReport обрабатывает URC +CDS: находит сообщение по
-// reference, сохраняет DR, обновляет статус, освобождает reference.
 func (s *Service) HandleDeliveryReport(ctx context.Context, ref int, tpst int, rawPDU string) error {
 	msgID, err := s.store.FindPendingReference(ctx, int64(ref))
 	if err != nil {
@@ -541,11 +578,9 @@ func (s *Service) HandleDeliveryReport(ctx context.Context, ref int, tpst int, r
 	if _, err := s.store.CreateDeliveryReport(ctx, dr); err != nil {
 		return fmt.Errorf("CreateDeliveryReport: %w", err)
 	}
-
 	if err := s.store.ReleaseReference(ctx, int64(ref)); err != nil {
 		s.logger.Warn("service: ReleaseReference", "ref", ref, "err", err)
 	}
-
 	s.logger.Info("service: DR обработан",
 		"ref", ref, "msg_id", msgID, "tpst", tpst)
 	return nil
@@ -558,7 +593,6 @@ func interpretTPST(tpst int) string {
 	return fmt.Sprintf("не доставлено (TP-ST=0x%02X)", tpst)
 }
 
-// nullInt64 оборачивает int64 в sql.NullInt64 с Valid=true.
 func nullInt64(v int64) sql.NullInt64 {
 	return sql.NullInt64{Int64: v, Valid: true}
 }

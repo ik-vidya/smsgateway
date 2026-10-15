@@ -13,9 +13,9 @@ import (
 	"github.com/ik-vidya/smsgateway/internal/storage"
 )
 
-const maxBodySize = 64 * 1024 // 64 КиБ
+const maxBodySize = 64 * 1024
 
-// handleHealthz — GET /healthz (без авторизации).
+// handleHealthz — GET /healthz.
 func (s *Server) handleHealthz(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
@@ -99,10 +99,7 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.logger.Info("сообщение принято в очередь",
-		"id", id,
-		"peer", msg.Peer,
-		"request_id", req.RequestID,
-	)
+		"id", id, "peer", msg.Peer, "request_id", req.RequestID)
 
 	writeJSON(w, http.StatusAccepted, SendResponse{
 		ID:     id,
@@ -224,6 +221,72 @@ func (s *Server) handleDeleteMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleTestSMS — POST /api/v1/test-sms.
+func (s *Server) handleTestSMS(w http.ResponseWriter, r *http.Request) {
+	if s.svc == nil {
+		writeError(w, http.StatusServiceUnavailable,
+			CodeUnavailable, "service не сконфигурирован")
+		return
+	}
+
+	var req TestSMSRequest
+	if r.ContentLength > 0 {
+		if err := decodeJSON(r, &req); err != nil {
+			writeError(w, http.StatusBadRequest, CodeBadRequest, err.Error())
+			return
+		}
+	}
+
+	res, err := s.svc.SendTestSMS(r.Context(), req.Text)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError,
+			CodeInternalError, err.Error())
+		return
+	}
+
+	resp := TestSMSResponse{
+		ID:       res.ID,
+		Status:   string(res.Status),
+		Error:    res.Error,
+		TimedOut: res.TimedOut,
+	}
+	if res.Reference != 0 {
+		ref := res.Reference
+		resp.Reference = &ref
+	}
+	if !res.SentAt.IsZero() {
+		t := res.SentAt
+		resp.SentAt = &t
+	}
+	if !res.DeliveredAt.IsZero() {
+		t := res.DeliveredAt
+		resp.DeliveredAt = &t
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// handleDiagnostics — GET /api/v1/diagnostics.
+func (s *Server) handleDiagnostics(w http.ResponseWriter, r *http.Request) {
+	if s.svc == nil {
+		writeError(w, http.StatusServiceUnavailable,
+			CodeUnavailable, "service не сконфигурирован")
+		return
+	}
+
+	res, err := s.svc.RunDiagnostics(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError,
+			CodeInternalError, err.Error())
+		return
+	}
+
+	// По умолчанию raw скрываем — там могут быть IMEI/IMSI/номера.
+	if r.URL.Query().Get("raw") != "1" {
+		res.Raw = nil
+	}
+	writeJSON(w, http.StatusOK, res)
 }
 
 // ==================== хелперы ====================

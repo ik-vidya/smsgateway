@@ -14,23 +14,20 @@ import (
 
 // ==================== MockModem ====================
 
-// mockModem реализует интерфейс Modem для тестов.
 type mockModem struct {
 	urcCh chan modem.URC
 
-	// Скрипты.
 	readSMSResult []modem.SMSMessage
 	readSMSErr    error
 
 	sendResult modem.SendResult
 	sendErr    error
-	// sendErrs — ошибки по попыткам. Если задан, приоритетнее sendErr.
-	// nil в позиции = успех на этой попытке.
-	sendErrs []error
+	sendErrs   []error
+
+	execResults map[string]string
 
 	deletedIndexes []int
 
-	// Записи вызовов.
 	sentCount int
 	execCalls []string
 }
@@ -45,7 +42,6 @@ func (m *mockModem) Init(ctx context.Context) error { return nil }
 
 func (m *mockModem) SendSMS(ctx context.Context, peer, text string, opts modem.SendOptions) (modem.SendResult, error) {
 	m.sentCount++
-	// Приоритет: sendErrs (по попыткам).
 	if len(m.sendErrs) > 0 {
 		idx := m.sentCount - 1
 		if idx < len(m.sendErrs) {
@@ -57,8 +53,6 @@ func (m *mockModem) SendSMS(ctx context.Context, peer, text string, opts modem.S
 		return modem.SendResult{}, m.sendErr
 	}
 	res := m.sendResult
-	// Для обратной совместимости: если задан только Reference,
-	// заполнить References.
 	if len(res.References) == 0 {
 		if res.Reference == 0 {
 			res.Reference = int64(m.sentCount)
@@ -88,6 +82,11 @@ func (m *mockModem) DeleteSMS(ctx context.Context, index int) error {
 
 func (m *mockModem) Exec(ctx context.Context, cmd string) (string, error) {
 	m.execCalls = append(m.execCalls, cmd)
+	if m.execResults != nil {
+		if r, ok := m.execResults[cmd]; ok {
+			return r, nil
+		}
+	}
 	return "", nil
 }
 
@@ -95,7 +94,6 @@ func (m *mockModem) URCs() <-chan modem.URC { return m.urcCh }
 func (m *mockModem) Info() modem.Info       { return modem.Info{} }
 func (m *mockModem) Close() error           { return nil }
 
-// Компилятор проверит, что mockModem реализует Modem.
 var _ Modem = (*mockModem)(nil)
 
 // ==================== helpers ====================
@@ -497,5 +495,98 @@ func TestSendMultipartPartialFailure(t *testing.T) {
 	got, _ := store.GetMessage(context.Background(), id)
 	if got.Status != storage.StatusFailed {
 		t.Errorf("status=%q, ожидалось failed", got.Status)
+	}
+}
+
+// ==================== SendTestSMS ====================
+
+func TestSendTestSMSNoSelfNumber(t *testing.T) {
+	mock := newMockModem()
+	svc, _ := newTestService(t, mock)
+
+	_, err := svc.SendTestSMS(context.Background(), "test")
+	if err == nil {
+		t.Fatal("ожидалась ошибка при пустом SELF_NUMBER")
+	}
+	if !strings.Contains(err.Error(), "SELF_NUMBER") {
+		t.Errorf("err=%v", err)
+	}
+}
+
+func TestSendTestSMSFailed(t *testing.T) {
+	mock := newMockModem()
+	mock.sendErr = &modem.ATError{Line: "+CMS ERROR: 305"}
+	svc, _ := newTestService(t, mock)
+	svc.selfNumber = "+37255691999"
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	go func() { _ = svc.Run(ctx) }()
+
+	res, err := svc.SendTestSMS(ctx, "test")
+	if err != nil {
+		t.Fatalf("SendTestSMS: %v", err)
+	}
+	if res.Status != storage.StatusFailed {
+		t.Errorf("Status=%q, ожидалось failed", res.Status)
+	}
+	if res.TimedOut {
+		t.Error("TimedOut=true, ожидалось false")
+	}
+	if res.Error == "" {
+		t.Error("Error пустой")
+	}
+}
+
+func TestSendTestSMSTimeout(t *testing.T) {
+	mock := newMockModem()
+	svc, _ := newTestService(t, mock)
+	svc.selfNumber = "+37255691999"
+	svc.sendInterval = 10 * time.Second
+	svc.testSMSTimeout = 200 * time.Millisecond
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	go func() { _ = svc.Run(ctx) }()
+
+	res, err := svc.SendTestSMS(ctx, "test")
+	if err != nil {
+		t.Fatalf("SendTestSMS: %v", err)
+	}
+	if !res.TimedOut {
+		t.Errorf("TimedOut=false, ожидалось true, status=%q", res.Status)
+	}
+}
+
+// ==================== Diagnostics ====================
+
+func TestRunDiagnostics(t *testing.T) {
+	mock := newMockModem()
+	mock.execResults = map[string]string{
+		"AT+CGMI":   "SIMCOM_Ltd",
+		"AT+CGMM":   "SIMCOM_SIM800L",
+		"AT+CGMR":   "Revision:1418B04SIM800L24",
+		"AT+CGSN":   "863584038586060",
+		"AT+CIMI":   "248030023272107",
+		"AT+CCID":   "89372038002032721077",
+		"AT+CPIN?":  "+CPIN: READY",
+		"AT+CSQ":    "+CSQ: 17,0",
+		"AT+CREG?":  `+CREG: 2,5,"00DF","156B"`,
+		"AT+CGREG?": `+CGREG: 2,5,"00DF","156B"`,
+		"AT+COPS?":  `+COPS: 0,0,"TELE2"`,
+		"AT+CSCA?":  `+CSCA: "2B33373235353039393131",145`,
+		"AT+CPMS?":  `+CPMS: "SM",0,50,"SM",0,50,"SM",0,25`,
+	}
+	svc, _ := newTestService(t, mock)
+
+	r, err := svc.RunDiagnostics(context.Background())
+	if err != nil {
+		t.Fatalf("RunDiagnostics: %v", err)
+	}
+	if r.Manufacturer != "SIMCOM_Ltd" {
+		t.Errorf("Manufacturer=%q", r.Manufacturer)
+	}
+	if r.Signal.RSSI != 17 {
+		t.Errorf("Signal.RSSI=%d", r.Signal.RSSI)
 	}
 }

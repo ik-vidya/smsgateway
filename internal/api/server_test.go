@@ -37,9 +37,6 @@ func newTestServer(t *testing.T) *Server {
 		LogFormat:    "text",
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	// svc=nil: для тестов API сервис не нужен, /status работает
-	// и без него (модем-информация отсутствует, uptime берётся
-	// из самого сервера).
 	return New(cfg, store, nil, logger)
 }
 
@@ -67,8 +64,6 @@ func doRequest(t *testing.T, s *Server, method, path string, body any, auth stri
 	return w
 }
 
-// ==================== healthz ====================
-
 func TestHealthzNoAuth(t *testing.T) {
 	s := newTestServer(t)
 	w := doRequest(t, s, "GET", "/healthz", nil, "")
@@ -83,8 +78,6 @@ func TestHealthzNoAuth(t *testing.T) {
 		t.Errorf("status=%q", resp["status"])
 	}
 }
-
-// ==================== auth ====================
 
 func TestAuthMissing(t *testing.T) {
 	s := newTestServer(t)
@@ -112,8 +105,6 @@ func TestAuthBearerHeader(t *testing.T) {
 		t.Fatalf("status=%d, тело: %s", w.Code, w.Body.String())
 	}
 }
-
-// ==================== send ====================
 
 func TestSendMessage(t *testing.T) {
 	s := newTestServer(t)
@@ -154,8 +145,6 @@ func TestSendMessageValidation(t *testing.T) {
 		})
 	}
 }
-
-// ==================== get/list ====================
 
 func TestGetMessage(t *testing.T) {
 	s := newTestServer(t)
@@ -246,8 +235,6 @@ func TestListMessagesBadSince(t *testing.T) {
 	}
 }
 
-// ==================== delete ====================
-
 func TestDeleteMessage(t *testing.T) {
 	s := newTestServer(t)
 	w := doRequest(t, s, "POST", "/api/v1/messages",
@@ -274,8 +261,6 @@ func TestDeleteMessageNotFound(t *testing.T) {
 	}
 }
 
-// ==================== status ====================
-
 func TestStatus(t *testing.T) {
 	s := newTestServer(t)
 	doRequest(t, s, "POST", "/api/v1/messages",
@@ -298,14 +283,27 @@ func TestStatus(t *testing.T) {
 	if resp.Database == nil || !resp.Database.Healthy {
 		t.Error("database не healthy")
 	}
-	// svc=nil — ModemStatus не заполняется (nil).
-	// Это нормально для тестов: API-слой не зависит от service.
 	if resp.Modem != nil {
 		t.Errorf("при svc=nil modem должен быть nil, получено: %+v", resp.Modem)
 	}
 }
 
-// ==================== helpers ====================
+func TestTestSMSWithoutService(t *testing.T) {
+	s := newTestServer(t)
+	w := doRequest(t, s, "POST", "/api/v1/test-sms",
+		TestSMSRequest{Text: "test"}, testKey)
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status=%d, ожидалось 503", w.Code)
+	}
+}
+
+func TestDiagnosticsWithoutService(t *testing.T) {
+	s := newTestServer(t)
+	w := doRequest(t, s, "GET", "/api/v1/diagnostics", nil, testKey)
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status=%d, ожидалось 503", w.Code)
+	}
+}
 
 func itoa(v int64) string {
 	return strconv.FormatInt(v, 10)

@@ -1,0 +1,215 @@
+package diagnostics
+
+import (
+	"context"
+	"errors"
+	"strings"
+	"testing"
+)
+
+type mockModem struct {
+	responses map[string]string
+	errs      map[string]error
+}
+
+func (m mockModem) Exec(_ context.Context, cmd string) (string, error) {
+	if err, ok := m.errs[cmd]; ok {
+		return "", err
+	}
+	if r, ok := m.responses[cmd]; ok {
+		return r, nil
+	}
+	return "", errors.New("unknown command: " + cmd)
+}
+
+func fullMock() mockModem {
+	return mockModem{
+		responses: map[string]string{
+			"AT+CGMI":   "SIMCOM_Ltd",
+			"AT+CGMM":   "SIMCOM_SIM800L",
+			"AT+CGMR":   "Revision:1418B04SIM800L24",
+			"AT+CGSN":   "863584038586060",
+			"AT+CIMI":   "248030023272107",
+			"AT+CCID":   "89372038002032721077",
+			"AT+CPIN?":  "+CPIN: READY",
+			"AT+CSQ":    "+CSQ: 17,0",
+			"AT+CREG?":  `+CREG: 2,5,"00DF","156B"`,
+			"AT+CGREG?": `+CGREG: 2,5,"00DF","156B"`,
+			"AT+COPS?":  `+COPS: 0,0,"TELE2"`,
+			"AT+CSCA?":  `+CSCA: "2B33373235353039393131",145`,
+			"AT+CPMS?":  `+CPMS: "SM",0,50,"SM",0,50,"SM",0,25`,
+		},
+		errs: map[string]error{},
+	}
+}
+
+func TestCollectFull(t *testing.T) {
+	r, err := Collect(context.Background(), fullMock())
+	if err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+
+	if r.Manufacturer != "SIMCOM_Ltd" {
+		t.Errorf("Manufacturer=%q", r.Manufacturer)
+	}
+	if r.Model != "SIMCOM_SIM800L" {
+		t.Errorf("Model=%q", r.Model)
+	}
+	if r.Revision != "Revision:1418B04SIM800L24" {
+		t.Errorf("Revision=%q", r.Revision)
+	}
+	if r.IMEI != "863584038586060" {
+		t.Errorf("IMEI=%q", r.IMEI)
+	}
+	if r.IMSI != "248030023272107" {
+		t.Errorf("IMSI=%q", r.IMSI)
+	}
+	if r.ICCID != "89372038002032721077" {
+		t.Errorf("ICCID=%q", r.ICCID)
+	}
+	if r.SIMStatus != "READY" {
+		t.Errorf("SIMStatus=%q", r.SIMStatus)
+	}
+	if r.Signal.RSSI != 17 || r.Signal.BER != 0 {
+		t.Errorf("Signal=%+v", r.Signal)
+	}
+	if r.Signal.DBM != -113+2*17 {
+		t.Errorf("DBM=%d, ожидалось %d", r.Signal.DBM, -113+2*17)
+	}
+	if r.Registration.Status != 5 {
+		t.Errorf("Registration.Status=%d", r.Registration.Status)
+	}
+	if r.Registration.LAC != "00DF" {
+		t.Errorf("Registration.LAC=%q", r.Registration.LAC)
+	}
+	if r.GPRSRegistration.Status != 5 {
+		t.Errorf("GPRSRegistration.Status=%d", r.GPRSRegistration.Status)
+	}
+	if r.Operator.Name != "TELE2" {
+		t.Errorf("Operator.Name=%q", r.Operator.Name)
+	}
+	if r.SMSC != "+3725509911" {
+		t.Errorf("SMSC=%q", r.SMSC)
+	}
+	if r.Storage.Read != "SM" || r.Storage.Write != "SM" {
+		t.Errorf("Storage=%+v", r.Storage)
+	}
+	if r.Storage.Total != 50 {
+		t.Errorf("Storage.Total=%d", r.Storage.Total)
+	}
+}
+
+func TestCollectPartialFailure(t *testing.T) {
+	m := fullMock()
+	m.errs["AT+CSQ"] = errors.New("timeout")
+	m.errs["AT+CCID"] = errors.New("no sim")
+
+	r, err := Collect(context.Background(), m)
+	if err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+	if r.Manufacturer != "SIMCOM_Ltd" {
+		t.Errorf("Manufacturer=%q", r.Manufacturer)
+	}
+	if r.Signal.RSSI != 0 {
+		t.Errorf("Signal.RSSI=%d", r.Signal.RSSI)
+	}
+	if r.ICCID != "" {
+		t.Errorf("ICCID=%q", r.ICCID)
+	}
+	if !strings.Contains(r.Raw["AT+CSQ"], "ERROR") {
+		t.Errorf("Raw[AT+CSQ]=%q", r.Raw["AT+CSQ"])
+	}
+}
+
+func TestParseSIMStatus(t *testing.T) {
+	cases := map[string]string{
+		"+CPIN: READY":   "READY",
+		"+CPIN: SIM PIN": "SIM PIN",
+		"READY":          "READY",
+	}
+	for in, want := range cases {
+		if got := parseSIMStatus(in); got != want {
+			t.Errorf("parseSIMStatus(%q)=%q, ожидалось %q", in, got, want)
+		}
+	}
+}
+
+func TestParseSignal(t *testing.T) {
+	cases := []struct {
+		in      string
+		rssi    int
+		quality string
+	}{
+		{"+CSQ: 25,0", 25, "отличный"},
+		{"+CSQ: 17,0", 17, "хороший"},
+		{"+CSQ: 12,0", 12, "удовлетворительный"},
+		{"+CSQ: 7,0", 7, "слабый"},
+		{"+CSQ: 2,0", 2, "очень слабый"},
+		{"+CSQ: 99,0", 99, "нет данных"},
+	}
+	for _, c := range cases {
+		got := parseSignal(c.in)
+		if got.RSSI != c.rssi || got.Quality != c.quality {
+			t.Errorf("parseSignal(%q)=%+v, ожидалось rssi=%d quality=%q",
+				c.in, got, c.rssi, c.quality)
+		}
+	}
+}
+
+func TestParseCREG(t *testing.T) {
+	cases := []struct {
+		in   string
+		stat int
+		lac  string
+		cid  string
+	}{
+		{`+CREG: 2,5,"00DF","156B"`, 5, "00DF", "156B"},
+		{`+CREG: 2,0`, 0, "", ""},
+		{`+CGREG: 2,5,"00DF","156B"`, 5, "00DF", "156B"},
+	}
+	for _, c := range cases {
+		got := parseCREG(c.in)
+		if got.Status != c.stat || got.LAC != c.lac || got.CID != c.cid {
+			t.Errorf("parseCREG(%q)=%+v, ожидалось %+v", c.in, got, c)
+		}
+	}
+}
+
+func TestParseOperator(t *testing.T) {
+	cases := []struct {
+		in   string
+		name string
+		code string
+	}{
+		{`+COPS: 0,0,"TELE2"`, "TELE2", ""},
+		{`+COPS: 0,2,"24702"`, "", "24702"},
+	}
+	for _, c := range cases {
+		got := parseOperator(c.in)
+		if got.Name != c.name || got.Code != c.code {
+			t.Errorf("parseOperator(%q)=%+v", c.in, got)
+		}
+	}
+}
+
+func TestParseSMSC(t *testing.T) {
+	got := parseSMSC(`+CSCA: "2B33373235353039393131",145`)
+	if got != "+3725509911" {
+		t.Errorf("parseSMSC=%q, ожидалось +3725509911", got)
+	}
+	got = parseSMSC(`+CSCA: "not-hex",145`)
+	if got != "not-hex" {
+		t.Errorf("parseSMSC=%q", got)
+	}
+}
+
+func TestParseStorage(t *testing.T) {
+	got := parseStorage(`+CPMS: "SM",0,50,"SM",0,50,"SM",0,25`)
+	if got.Read != "SM" || got.Write != "SM" {
+		t.Errorf("Storage=%+v", got)
+	}
+	if got.Used != 0 || got.Total != 50 {
+		t.Errorf("Storage.Used=%d Total=%d", got.Used, got.Total)
+	}
+}
