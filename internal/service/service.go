@@ -6,9 +6,8 @@
 //   - API (который кладёт сообщения в очередь через storage).
 //
 // Запускает фоновые горутины:
-//   - URC-цикл: реакция на +CMTI (новая SMS), +CDS (delivery report),
-//     +CREG/+CGREG (состояние сети), RDY (перезапуск модема).
-//   - Отправка: выборка queued-сообщений, отправка через SendSMS.
+//   - URC-цикл: реакция на +CMTI, +CDS, +CREG/+CGREG, RDY.
+//   - Отправка: выборка queued-сообщений, отправка с retry.
 //   - Просрочка pending_references: перевод в sent_no_dr.
 package service
 
@@ -24,6 +23,16 @@ import (
 	"github.com/ik-vidya/smsgateway/internal/storage"
 )
 
+// Дефолтные параметры retry.
+const (
+	DefaultSendMaxAttempts = 3
+)
+
+var DefaultSendBackoff = []time.Duration{
+	1 * time.Second,
+	5 * time.Second,
+}
+
 // Service — координатор.
 type Service struct {
 	modem  Modem
@@ -36,6 +45,10 @@ type Service struct {
 	refTTL          time.Duration
 	deleteAfterRead bool
 
+	// Retry.
+	sendMaxAttempts int
+	sendBackoff     []time.Duration
+
 	// Состояние.
 	mu          sync.RWMutex
 	networkStat int
@@ -46,7 +59,6 @@ type Service struct {
 }
 
 // Modem — интерфейс модема, используемый сервисом.
-// Позволяет подменить на mock в тестах.
 type Modem interface {
 	Init(ctx context.Context) error
 	SendSMS(ctx context.Context, peer, text string, opts modem.SendOptions) (modem.SendResult, error)
@@ -75,6 +87,14 @@ type Config struct {
 	// DeleteAfterRead — удалять ли SMS из памяти модема после
 	// сохранения в БД. true по умолчанию.
 	DeleteAfterRead bool
+
+	// SendMaxAttempts — сколько раз пытаться отправить одно SMS.
+	// 0 — DefaultSendMaxAttempts (3).
+	SendMaxAttempts int
+
+	// SendBackoff — паузы между попытками.
+	// 0 — DefaultSendBackoff ([1s, 5s]).
+	SendBackoff []time.Duration
 }
 
 func (c Config) withDefaults() Config {
@@ -86,6 +106,12 @@ func (c Config) withDefaults() Config {
 	}
 	if c.ReferenceTTL <= 0 {
 		c.ReferenceTTL = time.Hour
+	}
+	if c.SendMaxAttempts <= 0 {
+		c.SendMaxAttempts = DefaultSendMaxAttempts
+	}
+	if len(c.SendBackoff) == 0 {
+		c.SendBackoff = DefaultSendBackoff
 	}
 	return c
 }
@@ -101,16 +127,13 @@ func New(m Modem, store *storage.Store, logger *slog.Logger, cfg Config) *Servic
 		pendingInterval: cfg.PendingInterval,
 		refTTL:          cfg.ReferenceTTL,
 		deleteAfterRead: cfg.DeleteAfterRead,
+		sendMaxAttempts: cfg.SendMaxAttempts,
+		sendBackoff:     cfg.SendBackoff,
 		startTime:       time.Now(),
 	}
 }
 
 // Run запускает сервис. Блокируется до отмены ctx.
-//
-// Порядок:
-//  1. Init модема.
-//  2. Запуск горутин: URC-цикл, отправка, pending-цикл.
-//  3. Ожидание ctx.Done() или фатальной ошибки.
 func (s *Service) Run(ctx context.Context) error {
 	s.logger.Info("service: запуск")
 
@@ -126,7 +149,6 @@ func (s *Service) Run(ctx context.Context) error {
 	<-ctx.Done()
 	s.logger.Info("service: остановка, ждём горутины")
 
-	// Ждём завершения горутин с таймаутом.
 	done := make(chan struct{})
 	go func() {
 		s.wg.Wait()
@@ -160,6 +182,15 @@ func (s *Service) LastCSQ() int {
 	return s.lastCSQ
 }
 
+// ModemInfo возвращает информацию о модеме (или пустую Info,
+// если модем не сконфигурирован).
+func (s *Service) ModemInfo() modem.Info {
+	if s.modem == nil {
+		return modem.Info{}
+	}
+	return s.modem.Info()
+}
+
 // ==================== URC-цикл ====================
 
 func (s *Service) urcLoop(ctx context.Context) {
@@ -183,58 +214,57 @@ func (s *Service) urcLoop(ctx context.Context) {
 }
 
 func (s *Service) handleURC(ctx context.Context, u modem.URC) {
-    switch v := u.(type) {
-    case modem.URCCMTI:
-	s.logger.Info("service: новый SMS",
-	    "mem", v.Mem, "index", v.Index)
-	if err := s.ingestSMS(ctx, v.Index); err != nil {
-	    s.logger.Error("service: ingestSMS", "err", err, "index", v.Index)
+	switch v := u.(type) {
+	case modem.URCCMTI:
+		s.logger.Info("service: новый SMS",
+			"mem", v.Mem, "index", v.Index)
+		if err := s.ingestSMS(ctx, v.Index); err != nil {
+			s.logger.Error("service: ingestSMS", "err", err, "index", v.Index)
+		}
+
+	case modem.URCCDS:
+		s.logger.Info("service: delivery report",
+			"ref", v.Reference, "tpst", v.TPST, "peer", v.Peer)
+		if v.PDU == "" {
+			s.logger.Warn("service: +CDS без PDU, пропускаю")
+			return
+		}
+		if err := s.HandleDeliveryReport(ctx,
+			v.Reference, v.TPST, v.PDU); err != nil {
+			s.logger.Warn("service: HandleDeliveryReport",
+				"ref", v.Reference, "err", err)
+		}
+
+	case modem.URCCREG:
+		s.mu.Lock()
+		s.networkStat = v.Stat
+		s.mu.Unlock()
+		s.logger.Info("service: регистрация",
+			"stat", v.Stat, "lac", v.LAC, "cid", v.CID)
+
+	case modem.URCCGREG:
+		s.logger.Info("service: GPRS-регистрация",
+			"stat", v.Stat, "lac", v.LAC, "cid", v.CID)
+
+	case modem.URCCBC:
+		s.logger.Debug("service: батарея",
+			"percent", v.Percent, "mv", v.MilliV)
+
+	case modem.URCRDY:
+		s.logger.Warn("service: модем перезапустился (RDY)")
+
+	case modem.URCRing:
+		s.logger.Info("service: входящий звонок")
+
+	case modem.URCNoCarrier:
+		s.logger.Info("service: соединение потеряно")
+
+	case modem.URCCUSD:
+		s.logger.Info("service: USSD", "stat", v.Stat, "text", v.Text)
+
+	default:
+		s.logger.Debug("service: неизвестный URC", "kind", u.Kind())
 	}
-
-    case modem.URCCDS:
-	s.logger.Info("service: delivery report",
-	    "ref", v.Reference, "tpst", v.TPST, "peer", v.Peer)
-	if v.PDU == "" {
-	    // Не удалось получить PDU — не можем сопоставить.
-	    s.logger.Warn("service: +CDS без PDU, пропускаю")
-	    return
-	}
-	if err := s.HandleDeliveryReport(ctx,
-	    v.Reference, v.TPST, v.PDU); err != nil {
-	    s.logger.Warn("service: HandleDeliveryReport",
-		"ref", v.Reference, "err", err)
-	}
-
-    case modem.URCCREG:
-	s.mu.Lock()
-	s.networkStat = v.Stat
-	s.mu.Unlock()
-	s.logger.Info("service: регистрация",
-	    "stat", v.Stat, "lac", v.LAC, "cid", v.CID)
-
-    case modem.URCCGREG:
-	s.logger.Info("service: GPRS-регистрация",
-	    "stat", v.Stat, "lac", v.LAC, "cid", v.CID)
-
-    case modem.URCCBC:
-	s.logger.Debug("service: батарея",
-	    "percent", v.Percent, "mv", v.MilliV)
-
-    case modem.URCRDY:
-	s.logger.Warn("service: модем перезапустился (RDY)")
-
-    case modem.URCRing:
-	s.logger.Info("service: входящий звонок")
-
-    case modem.URCNoCarrier:
-	s.logger.Info("service: соединение потеряно")
-
-    case modem.URCCUSD:
-	s.logger.Info("service: USSD", "stat", v.Stat, "text", v.Text)
-
-    default:
-	s.logger.Debug("service: неизвестный URC", "kind", u.Kind())
-    }
 }
 
 // ingestSMS читает SMS по индексу из памяти модема, сохраняет в БД
@@ -257,7 +287,6 @@ func (s *Service) ingestSMS(ctx context.Context, index int) error {
 	}
 
 	// Дедупликация: есть ли уже такое сообщение в БД?
-	// Проверяем по peer + text (упрощённо).
 	existing, _, err := s.store.ListMessages(ctx, storage.Filter{
 		Direction: storage.DirectionIn,
 		Peer:      target.Peer,
@@ -302,7 +331,8 @@ func (s *Service) ingestSMS(ctx context.Context, index int) error {
 func (s *Service) sendLoop(ctx context.Context) {
 	defer s.wg.Done()
 	s.logger.Info("service: цикл отправки запущен",
-		"interval", s.sendInterval)
+		"interval", s.sendInterval,
+		"max_attempts", s.sendMaxAttempts)
 
 	ticker := time.NewTicker(s.sendInterval)
 	defer ticker.Stop()
@@ -319,9 +349,6 @@ func (s *Service) sendLoop(ctx context.Context) {
 }
 
 // processQueue обрабатывает одно сообщение из очереди за раз.
-// Обработка по одному выбрана сознательно: последовательная
-// отправка упрощает бронирование reference и снижает нагрузку
-// на модем.
 func (s *Service) processQueue(ctx context.Context) {
 	msgs, _, err := s.store.ListMessages(ctx, storage.Filter{
 		Direction: storage.DirectionOut,
@@ -338,6 +365,7 @@ func (s *Service) processQueue(ctx context.Context) {
 	s.sendOne(ctx, msgs[0])
 }
 
+// sendOne отправляет одно сообщение с retry при транзиентных ошибках.
 func (s *Service) sendOne(ctx context.Context, msg *storage.Message) {
 	s.logger.Info("service: отправка",
 		"id", msg.ID, "peer", msg.Peer)
@@ -348,12 +376,11 @@ func (s *Service) sendOne(ctx context.Context, msg *storage.Message) {
 		return
 	}
 
-	// 2. Отправить.
-	res, err := s.modem.SendSMS(ctx, msg.Peer, msg.Text,
-		modem.SendOptions{RequestDR: true})
+	// 2. Отправить с retry.
+	res, attempts, err := s.sendWithRetry(ctx, msg)
 	if err != nil {
 		s.logger.Warn("service: SendSMS не удалось",
-			"id", msg.ID, "err", err)
+			"id", msg.ID, "attempts", attempts, "err", err)
 		_ = s.store.MarkFailed(ctx, msg.ID, err.Error())
 		return
 	}
@@ -363,7 +390,6 @@ func (s *Service) sendOne(ctx context.Context, msg *storage.Message) {
 		res.Reference, msg.ID, s.refTTL); err != nil {
 		s.logger.Warn("service: не удалось забронировать reference",
 			"ref", res.Reference, "id", msg.ID, "err", err)
-		// Не критично — просто не будет сопоставления DR.
 	}
 
 	// 4. Пометить sent.
@@ -372,7 +398,64 @@ func (s *Service) sendOne(ctx context.Context, msg *storage.Message) {
 		return
 	}
 	s.logger.Info("service: SMS отправлено",
-		"id", msg.ID, "ref", res.Reference)
+		"id", msg.ID, "ref", res.Reference, "attempts", attempts)
+}
+
+// sendWithRetry вызывает SendSMS до s.sendMaxAttempts раз, пока
+// ошибка транзиентная. Возвращает результат, число сделанных
+// попыток и последнюю ошибку.
+func (s *Service) sendWithRetry(ctx context.Context, msg *storage.Message) (modem.SendResult, int, error) {
+	var lastErr error
+	var lastRes modem.SendResult
+
+	for attempt := 1; attempt <= s.sendMaxAttempts; attempt++ {
+		res, err := s.modem.SendSMS(ctx, msg.Peer, msg.Text,
+			modem.SendOptions{RequestDR: true})
+		if err == nil {
+			return res, attempt, nil
+		}
+		lastErr = err
+		lastRes = res
+
+		// Постоянная ошибка — прекращаем попытки.
+		if !modem.IsTransientError(err) {
+			s.logger.Warn("service: постоянная ошибка, retry не поможет",
+				"id", msg.ID, "attempt", attempt, "err", err)
+			return res, attempt, err
+		}
+
+		// Последняя попытка — выходим.
+		if attempt >= s.sendMaxAttempts {
+			break
+		}
+
+		// Пауза перед следующей попыткой.
+		wait := s.backoffFor(attempt)
+		if wait > 0 {
+			s.logger.Warn("service: транзиентная ошибка, повтор",
+				"id", msg.ID,
+				"attempt", attempt,
+				"max", s.sendMaxAttempts,
+				"wait", wait,
+				"err", err)
+			select {
+			case <-ctx.Done():
+				return lastRes, attempt, ctx.Err()
+			case <-time.After(wait):
+			}
+		}
+	}
+	return lastRes, s.sendMaxAttempts, lastErr
+}
+
+// backoffFor возвращает паузу перед попыткой attempt+1.
+// attempt — номер уже сделанной попытки (1-based).
+func (s *Service) backoffFor(attempt int) time.Duration {
+	idx := attempt - 1
+	if idx < 0 || idx >= len(s.sendBackoff) {
+		return 0
+	}
+	return s.sendBackoff[idx]
 }
 
 // ==================== Pending references ====================
@@ -414,14 +497,10 @@ func (s *Service) processExpiredReferences(ctx context.Context) {
 	}
 }
 
-// ==================== Обработка delivery report ====================
+// ==================== Delivery reports ====================
 
-// HandleDeliveryReport — вызывается извне (или из URC-цикла),
-// когда из модема пришёл полный PDU отчёта о доставке.
-//
-// В текущей реализации URC +CDS приходит как две строки (header и
-// PDU), которые читаются последовательно. Пока метод предоставляется
-// как API для будущей интеграции.
+// HandleDeliveryReport обрабатывает URC +CDS: находит сообщение по
+// reference, сохраняет DR, обновляет статус, освобождает reference.
 func (s *Service) HandleDeliveryReport(ctx context.Context, ref int, tpst int, rawPDU string) error {
 	msgID, err := s.store.FindPendingReference(ctx, int64(ref))
 	if err != nil {
@@ -459,13 +538,4 @@ func interpretTPST(tpst int) string {
 // nullInt64 оборачивает int64 в sql.NullInt64 с Valid=true.
 func nullInt64(v int64) sql.NullInt64 {
 	return sql.NullInt64{Int64: v, Valid: true}
-}
-
-// ModemInfo возвращает информацию о модеме (или пустую Info,
-// если модем не сконфигурирован).
-func (s *Service) ModemInfo() modem.Info {
-    if s.modem == nil {
-	return modem.Info{}
-    }
-    return s.modem.Info()
 }
