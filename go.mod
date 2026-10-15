@@ -6,6 +6,7 @@ require (
 	github.com/ik-vidya/sim800ctl v0.0.0-20261014110528-5dca6c8ddf8d
 	github.com/joho/godotenv v1.5.1
 	github.com/spf13/cobra v1.10.2
+	go.bug.st/serial v1.8.0
 	modernc.org/sqlite v1.60.1
 )
 

@@ -4,6 +4,8 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
+	"log/slog"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -15,6 +17,9 @@ import (
 	"github.com/ik-vidya/smsgateway/internal/api"
 	"github.com/ik-vidya/smsgateway/internal/config"
 	"github.com/ik-vidya/smsgateway/internal/logging"
+	"github.com/ik-vidya/smsgateway/internal/modem"
+	"github.com/ik-vidya/smsgateway/internal/profiles"
+	"github.com/ik-vidya/smsgateway/internal/service"
 	"github.com/ik-vidya/smsgateway/internal/storage"
 )
 
@@ -47,10 +52,14 @@ AT-совместимый GSM-модем. Предоставляет HTTP/JSON R
 
 Без подкоманды запускает сервис. Требуется флаг --config.
 
+Если SERIAL_PORT пуст или = "none", сервис запускается в режиме
+"без модема": API принимает сообщения в очередь, но не отправляет.
+
 Примеры:
     smsgateway --config /etc/smsgateway/.env
     smsgateway version
-    smsgateway migrate --config /etc/smsgateway/.env`,
+    smsgateway migrate --config /etc/smsgateway/.env
+    smsgateway list-ports`,
 	SilenceUsage:  true,
 	SilenceErrors: true,
 	RunE:          runService,
@@ -58,13 +67,14 @@ AT-совместимый GSM-модем. Предоставляет HTTP/JSON R
 
 func init() {
 	rootCmd.PersistentFlags().StringVar(&flagConfig, "config", "",
-		"путь к .env-файлу (обязателен для всех команд, кроме version)")
+		"путь к .env-файлу (обязателен для всех команд, кроме version и list-ports)")
 	rootCmd.Flags().BoolVarP(&flagShowVersion, "version", "v", false,
 		"показать версию и выйти")
 
 	rootCmd.AddCommand(
 		cmdVersion(),
 		cmdMigrate(),
+		cmdListPorts(),
 	)
 }
 
@@ -81,6 +91,28 @@ func cmdVersion() *cobra.Command {
 
 func printVersion() {
 	fmt.Printf("smsgateway %s (сборка %s)\n", version, buildTime)
+}
+
+// cmdListPorts — подкоманда `smsgateway list-ports`.
+func cmdListPorts() *cobra.Command {
+	return &cobra.Command{
+		Use:   "list-ports",
+		Short: "Показать доступные последовательные порты",
+		RunE: func(_ *cobra.Command, _ []string) error {
+			ports, err := modem.ListSerialPorts()
+			if err != nil {
+				return err
+			}
+			if len(ports) == 0 {
+				fmt.Println("Порты не найдены.")
+				return nil
+			}
+			for _, p := range ports {
+				fmt.Println(p)
+			}
+			return nil
+		},
+	}
 }
 
 // cmdMigrate — подкоманда `smsgateway migrate`.
@@ -176,15 +208,60 @@ func runService(_ *cobra.Command, _ []string) error {
 	}
 	go store.RunRetention(ctx, retentionPolicy, logger)
 
+	// --- Инициализация модема (или режим без модема) ---
+	var svc *service.Service
+	if cfg.SerialPort == "" || cfg.SerialPort == "none" {
+		logger.Warn("модем не сконфигурирован (SERIAL_PORT пуст) — режим без модема")
+		svc = service.New(nopModem{}, store, logger, service.Config{
+			DeleteAfterRead: cfg.SMSDeleteAfterRead,
+		})
+	} else {
+		profile, err := profiles.Get(cfg.ModemProfile)
+		if err != nil {
+			return fmt.Errorf("профиль модема: %w", err)
+		}
+		logger.Info("профиль модема", "profile", profile.Name())
+
+		port, err := modem.OpenSerial(modem.SerialConfig{
+			Port: cfg.SerialPort,
+			Baud: cfg.SerialBaud,
+		})
+		if err != nil {
+			return fmt.Errorf("открытие serial: %w", err)
+		}
+
+		m, err := modem.NewModem(port, profile,
+			cfg.ModemCmdTimeout, slogAdapter{logger})
+		if err != nil {
+			_ = port.Close()
+			return fmt.Errorf("создание Modem: %w", err)
+		}
+		defer func() {
+			if cerr := m.Close(); cerr != nil {
+				logger.Error("закрытие модема", "err", cerr)
+			}
+		}()
+
+		svc = service.New(m, store, logger, service.Config{
+			DeleteAfterRead: cfg.SMSDeleteAfterRead,
+			ReferenceTTL:    0,
+		})
+	}
+
+	// --- Сервис в фоне ---
+	svcErr := make(chan error, 1)
+	go func() {
+		svcErr <- svc.Run(ctx)
+	}()
+
 	// --- HTTP API ---
 	apiServer := api.New(cfg, store, logger)
-
 	serverErr := make(chan error, 1)
 	go func() {
 		serverErr <- apiServer.Start()
 	}()
 
-	// --- Ожидание сигнала остановки или падения сервера ---
+	// --- Ожидание сигнала остановки или падения одной из горутин ---
 	select {
 	case <-ctx.Done():
 		logger.Info("получен сигнал остановки")
@@ -197,6 +274,10 @@ func runService(_ *cobra.Command, _ []string) error {
 	case err := <-serverErr:
 		if err != nil {
 			return fmt.Errorf("http server: %w", err)
+		}
+	case err := <-svcErr:
+		if err != nil {
+			return fmt.Errorf("service: %w", err)
 		}
 	}
 
@@ -219,3 +300,36 @@ func ensureDir(dbPath string) error {
 	}
 	return nil
 }
+
+// ==================== вспомогательное ====================
+
+// nopModem — заглушка для режима "без модема".
+// URCs() возвращает канал, который никогда не закрывается — Run
+// будет ждать ctx.Done().
+type nopModem struct{}
+
+func (nopModem) Init(context.Context) error { return nil }
+func (nopModem) SendSMS(context.Context, string, string, modem.SendOptions) (modem.SendResult, error) {
+	return modem.SendResult{}, fmt.Errorf("модем не сконфигурирован")
+}
+func (nopModem) ReadSMS(context.Context, modem.ReadFilter) ([]modem.SMSMessage, error) {
+	return nil, nil
+}
+func (nopModem) DeleteSMS(context.Context, int) error { return nil }
+func (nopModem) Exec(context.Context, string) (string, error) {
+	return "", fmt.Errorf("модем не сконфигурирован")
+}
+func (nopModem) URCs() <-chan modem.URC { return make(chan modem.URC) }
+func (nopModem) Info() modem.Info       { return modem.Info{} }
+func (nopModem) Close() error           { return nil }
+
+// slogAdapter адаптирует *slog.Logger под интерфейс modem.Logger.
+type slogAdapter struct{ l *slog.Logger }
+
+func (a slogAdapter) Debug(msg string, args ...any) { a.l.Debug(msg, args...) }
+func (a slogAdapter) Info(msg string, args ...any)  { a.l.Info(msg, args...) }
+func (a slogAdapter) Warn(msg string, args ...any)  { a.l.Warn(msg, args...) }
+func (a slogAdapter) Error(msg string, args ...any) { a.l.Error(msg, args...) }
+
+// тихо игнорируем io и прочие импорты, если они больше не нужны
+var _ = io.Discard
