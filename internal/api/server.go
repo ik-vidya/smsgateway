@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/ik-vidya/smsgateway/internal/config"
+	"github.com/ik-vidya/smsgateway/internal/service"
 	"github.com/ik-vidya/smsgateway/internal/storage"
 )
 
@@ -18,16 +19,22 @@ import (
 type Server struct {
 	cfg       *config.Config
 	store     *storage.Store
+	svc       *service.Service // может быть nil (в тестах)
 	logger    *slog.Logger
 	http      *http.Server
 	startTime time.Time
 }
 
 // New создаёт сервер с готовыми маршрутами.
-func New(cfg *config.Config, store *storage.Store, logger *slog.Logger) *Server {
+//
+// svc может быть nil — тогда /api/v1/status отдаст часть данных
+// (uptime берётся из самого сервера, modem-информация отсутствует).
+// Это удобно для юнит-тестов, где service не нужен.
+func New(cfg *config.Config, store *storage.Store, svc *service.Service, logger *slog.Logger) *Server {
 	s := &Server{
 		cfg:       cfg,
 		store:     store,
+		svc:       svc,
 		logger:    logger,
 		startTime: time.Now(),
 	}
@@ -63,15 +70,14 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	return s.http.Shutdown(ctx)
 }
 
-// routes собирает маршруты. Используем http.ServeMux из Go 1.22+
-// с метод-специфичными паттернами.
+// routes собирает маршруты.
 func (s *Server) routes() http.Handler {
 	mux := http.NewServeMux()
 
 	// Публичные эндпоинты (без авторизации).
 	mux.HandleFunc("GET /healthz", s.handleHealthz)
 
-	// Защищённые эндпоинты — оборачиваются в auth.
+	// Защищённые эндпоинты.
 	protected := http.NewServeMux()
 	protected.HandleFunc("GET /api/v1/status", s.handleStatus)
 	protected.HandleFunc("POST /api/v1/messages", s.handleSendMessage)
@@ -81,6 +87,5 @@ func (s *Server) routes() http.Handler {
 
 	mux.Handle("/api/v1/", s.withAuth(protected))
 
-	// Оборачиваем всё в логирование и recover.
 	return s.withRecover(s.withLogging(mux))
 }

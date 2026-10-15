@@ -255,7 +255,7 @@ func runService(_ *cobra.Command, _ []string) error {
 	}()
 
 	// --- HTTP API ---
-	apiServer := api.New(cfg, store, logger)
+	apiServer := api.New(cfg, store, svc, logger)
 	serverErr := make(chan error, 1)
 	go func() {
 		serverErr <- apiServer.Start()

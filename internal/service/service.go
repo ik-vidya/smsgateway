@@ -451,3 +451,12 @@ func interpretTPST(tpst int) string {
 func nullInt64(v int64) sql.NullInt64 {
 	return sql.NullInt64{Int64: v, Valid: true}
 }
+
+// ModemInfo возвращает информацию о модеме (или пустую Info,
+// если модем не сконфигурирован).
+func (s *Service) ModemInfo() modem.Info {
+    if s.modem == nil {
+	return modem.Info{}
+    }
+    return s.modem.Info()
+}

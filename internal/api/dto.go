@@ -1,8 +1,4 @@
 // Package api, файл dto.go — DTO для JSON-сериализации.
-//
-// Модели storage содержат sql.NullInt64/sql.NullTime, которые
-// неудобны в JSON (либо пишутся как объекты, либо требуют
-// кастомного MarshalJSON). Здесь — чистые DTO с указателями.
 package api
 
 import (
@@ -85,10 +81,10 @@ type SendResponse struct {
 
 // ListResponse — ответ GET /api/v1/messages.
 type ListResponse struct {
-	Items []MessageDTO `json:"items"`
-	Total int          `json:"total"`
-	Limit int          `json:"limit"`
-	Offset int         `json:"offset"`
+	Items  []MessageDTO `json:"items"`
+	Total  int          `json:"total"`
+	Limit  int          `json:"limit"`
+	Offset int          `json:"offset"`
 }
 
 // StatusResponse — ответ GET /api/v1/status.
@@ -102,19 +98,43 @@ type StatusResponse struct {
 
 // DBStatus — состояние базы данных.
 type DBStatus struct {
-	Path     string `json:"path,omitempty"`
-	Healthy  bool   `json:"healthy"`
+	Path    string `json:"path,omitempty"`
+	Healthy bool   `json:"healthy"`
 }
 
-// ModemStatus — состояние модема (заглушка; заполнится позже).
+// ModemStatus — состояние модема.
+//
+// Configured=false — модем не сконфигурирован (SERIAL_PORT пуст или
+// "none"); в этом случае остальные поля пусты, и сервис работает
+// в режиме "без модема".
 type ModemStatus struct {
-	Connected    bool   `json:"connected"`
+	Configured   bool   `json:"configured"`
 	Port         string `json:"port,omitempty"`
 	Profile      string `json:"profile,omitempty"`
 	Manufacturer string `json:"manufacturer,omitempty"`
 	Model        string `json:"model,omitempty"`
+	Revision     string `json:"revision,omitempty"`
 	IMEI         string `json:"imei,omitempty"`
-	Signal       int    `json:"signal,omitempty"`      // rssi 0..31
-	Registered   bool   `json:"registered,omitempty"`
-	Operator     string `json:"operator,omitempty"`
+	Signal       int    `json:"signal"`       // rssi 0..31, 0 если неизвестно
+	Network      int    `json:"network"`      // CREG stat
+	NetworkText  string `json:"network_text,omitempty"`
+}
+
+// networkStatusText расшифровывает CREG-статус.
+func networkStatusText(stat int) string {
+	switch stat {
+	case 0:
+		return "не зарегистрирован, поиск не ведётся"
+	case 1:
+		return "зарегистрирован (домашняя сеть)"
+	case 2:
+		return "идёт поиск сети"
+	case 3:
+		return "регистрация отклонена"
+	case 4:
+		return "неизвестно"
+	case 5:
+		return "зарегистрирован (роуминг)"
+	}
+	return ""
 }

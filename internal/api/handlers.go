@@ -39,25 +39,38 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	resp := StatusResponse{
 		Status:   "ok",
-		Uptime:   time.Since(s.startTime).Round(time.Second).String(),
 		Messages: msgCounts,
 		Database: &DBStatus{
 			Path:    s.cfg.DBPath,
 			Healthy: true,
 		},
-		Modem: &ModemStatus{
-			Connected: false,
-			Port:      s.cfg.SerialPort,
-			Profile:   s.cfg.ModemProfile,
-		},
 	}
+
+	if s.svc != nil {
+		resp.Uptime = s.svc.Uptime().Round(time.Second).String()
+		info := s.svc.ModemInfo()
+		configured := s.cfg.SerialPort != "" && s.cfg.SerialPort != "none"
+		netStat := s.svc.NetworkStatus()
+		resp.Modem = &ModemStatus{
+			Configured:   configured,
+			Port:         s.cfg.SerialPort,
+			Profile:      s.cfg.ModemProfile,
+			Manufacturer: info.Manufacturer,
+			Model:        info.Model,
+			Revision:     info.Revision,
+			IMEI:         info.IMEI,
+			Signal:       s.svc.LastCSQ(),
+			Network:      netStat,
+			NetworkText:  networkStatusText(netStat),
+		}
+	} else {
+		resp.Uptime = time.Since(s.startTime).Round(time.Second).String()
+	}
+
 	writeJSON(w, http.StatusOK, resp)
 }
 
 // handleSendMessage — POST /api/v1/messages.
-//
-// Пока только создаёт запись со статусом queued. Реальная отправка
-// через модем появится в сервисном слое.
 func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 

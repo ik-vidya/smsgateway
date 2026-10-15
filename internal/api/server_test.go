@@ -31,13 +31,16 @@ func newTestServer(t *testing.T) *Server {
 		HTTPAddr:     "127.0.0.1:0",
 		APIKeys:      []string{testKey},
 		DBPath:       ":memory:",
-		SerialPort:   "/dev/null",
+		SerialPort:   "none",
 		ModemProfile: "generic",
 		LogLevel:     "error",
 		LogFormat:    "text",
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	return New(cfg, store, logger)
+	// svc=nil: для тестов API сервис не нужен, /status работает
+	// и без него (модем-информация отсутствует, uptime берётся
+	// из самого сервера).
+	return New(cfg, store, nil, logger)
 }
 
 func doRequest(t *testing.T, s *Server, method, path string, body any, auth string) *httptest.ResponseRecorder {
@@ -295,8 +298,10 @@ func TestStatus(t *testing.T) {
 	if resp.Database == nil || !resp.Database.Healthy {
 		t.Error("database не healthy")
 	}
-	if resp.Modem == nil || resp.Modem.Connected {
-		t.Error("modem должен быть not connected (заглушка)")
+	// svc=nil — ModemStatus не заполняется (nil).
+	// Это нормально для тестов: API-слой не зависит от service.
+	if resp.Modem != nil {
+		t.Errorf("при svc=nil modem должен быть nil, получено: %+v", resp.Modem)
 	}
 }
 
