@@ -1,5 +1,5 @@
 // Package modem, файл sms.go — высокоуровневые операции с SMS:
-// отправка, чтение, удаление.
+// отправка (в том числе multipart), чтение, удаление.
 //
 // Отправка работает в PDU-режиме (AT+CMGF=0) с использованием
 // github.com/ik-vidya/sim800ctl/pkg/pdu. ForceUCS2 и RequestDR
@@ -24,16 +24,30 @@ type SendOptions struct {
 }
 
 // SendResult — результат отправки.
+//
+// Для multipart содержит несколько references (по одному на часть).
+// Поля Reference, TPDULength, RawPDU сохранены для обратной
+// совместимости и содержат данные первой части.
 type SendResult struct {
-	Reference  int64  // TP-MR из +CMGS: <ref>
-	TPDULength int    // длина TPDU (без октета SMSC)
-	RawPDU     string // hex PDU, отправленный в модем
+	// Общие.
+	Parts int `json:"parts"` // число частей
+
+	// Первая часть (для обратной совместимости).
+	Reference  int64  `json:"reference"`   // TP-MR первой части
+	TPDULength int    `json:"tpdu_length"` // длина TPDU первой части
+	RawPDU     string `json:"raw_pdu"`     // hex PDU первой части
+
+	// Все части.
+	References []int64  `json:"references"` // TP-MR каждой части
+	RawPDUs    []string `json:"raw_pdus"`   // hex PDU каждой части
 }
 
-// SendSMS собирает PDU и отправляет его через AT+CMGS.
+// SendSMS собирает PDU и отправляет все части через AT+CMGS.
 //
-// Пока не поддерживает multipart (возвращает ошибку, если текст
-// не помещается в одну часть).
+// Текст разбивается автоматически (GSM-7: 160/153, UCS-2: 70/67
+// символов). Каждая часть отправляется отдельным AT+CMGS. Если
+// любая часть падает, возвращается ошибка с указанием номера части;
+// уже отправленные части отменить нельзя — это ограничение GSM.
 func (m *Modem) SendSMS(ctx context.Context, peer, text string, opts SendOptions) (SendResult, error) {
 	// 1. PDU-режим.
 	if _, err := m.Exec(ctx, "AT+CMGF=0"); err != nil {
@@ -64,45 +78,43 @@ func (m *Modem) SendSMS(ctx context.Context, peer, text string, opts SendOptions
 	if len(parts) == 0 {
 		return SendResult{}, fmt.Errorf("сборка PDU: пустой результат")
 	}
-	if len(parts) > 1 {
-		return SendResult{}, fmt.Errorf(
-			"multipart не поддержан на этом уровне: частей %d", len(parts))
+
+	res := SendResult{
+		Parts:      len(parts),
+		References: make([]int64, 0, len(parts)),
+		RawPDUs:    make([]string, 0, len(parts)),
 	}
 
-	part := parts[0]
+	// 4. Отправить все части последовательно.
+	for i, part := range parts {
+		cmd := fmt.Sprintf("AT+CMGS=%d", part.TpduLength)
+		payload := []byte(part.Hex + "\x1a")
 
-	// 4. Отправить через ExecPrompt.
-	cmd := fmt.Sprintf("AT+CMGS=%d", part.TpduLength)
-	payload := []byte(part.Hex + "\x1a")
-
-	resp, err := m.transport.ExecPrompt(ctx, cmd, payload)
-	if err != nil {
-		return SendResult{
-			TPDULength: part.TpduLength,
-			RawPDU:     part.Hex,
-		}, fmt.Errorf("AT+CMGS: %w", err)
+		resp, err := m.transport.ExecPrompt(ctx, cmd, payload)
+		if err != nil {
+			return res, fmt.Errorf("часть %d/%d: %w",
+				i+1, len(parts), err)
+		}
+		ref, err := parseCMGSReference(resp.Payload())
+		if err != nil {
+			return res, fmt.Errorf("часть %d/%d: %w",
+				i+1, len(parts), err)
+		}
+		res.References = append(res.References, ref)
+		res.RawPDUs = append(res.RawPDUs, part.Hex)
 	}
 
-	// 5. Разобрать +CMGS: <ref>.
-	ref, err := parseCMGSReference(resp.Payload())
-	if err != nil {
-		return SendResult{
-			TPDULength: part.TpduLength,
-			RawPDU:     part.Hex,
-		}, err
-	}
+	// 5. Заполнить поля первой части для совместимости.
+	res.Reference = res.References[0]
+	res.TPDULength = parts[0].TpduLength
+	res.RawPDU = parts[0].Hex
 
 	m.logger.Info("modem: SMS отправлено",
 		"peer", peer,
-		"reference", ref,
-		"tpdu_len", part.TpduLength,
+		"parts", len(parts),
+		"references", res.References,
 	)
-
-	return SendResult{
-		Reference:  ref,
-		TPDULength: part.TpduLength,
-		RawPDU:     part.Hex,
-	}, nil
+	return res, nil
 }
 
 // parseCMGSReference ищет "+CMGS: <n>" в payload.
@@ -260,10 +272,6 @@ func pduStatText(code int) string {
 // ==================== Delete ====================
 
 // DeleteSMS удаляет SMS по индексу.
-//
-// Перед удалением выравнивает storage (если профиль требует),
-// чтобы индекс соответствовал тому же хранилищу, из которого
-// мы читали.
 func (m *Modem) DeleteSMS(ctx context.Context, index int) error {
 	if err := m.maybeAlignStorage(ctx); err != nil {
 		m.logger.Warn("modem: выравнивание storage не удалось",

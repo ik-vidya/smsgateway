@@ -57,8 +57,19 @@ func (m *mockModem) SendSMS(ctx context.Context, peer, text string, opts modem.S
 		return modem.SendResult{}, m.sendErr
 	}
 	res := m.sendResult
-	if res.Reference == 0 {
-		res.Reference = int64(m.sentCount)
+	// Для обратной совместимости: если задан только Reference,
+	// заполнить References.
+	if len(res.References) == 0 {
+		if res.Reference == 0 {
+			res.Reference = int64(m.sentCount)
+		}
+		res.References = []int64{res.Reference}
+	}
+	if res.Parts == 0 {
+		res.Parts = len(res.References)
+	}
+	if len(res.RawPDUs) == 0 {
+		res.RawPDUs = make([]string, len(res.References))
 	}
 	return res, nil
 }
@@ -104,8 +115,7 @@ func newTestService(t *testing.T, m Modem) (*Service, *storage.Store) {
 		PendingInterval: 100 * time.Millisecond,
 		ReferenceTTL:    time.Hour,
 		DeleteAfterRead: true,
-		// Уменьшаем паузы, чтобы тесты не ждали дефолтные 1s/5s.
-		SendBackoff: []time.Duration{20 * time.Millisecond, 30 * time.Millisecond},
+		SendBackoff:     []time.Duration{20 * time.Millisecond, 30 * time.Millisecond},
 	})
 	return svc, store
 }
@@ -149,13 +159,12 @@ func TestSendLoopProcessesQueue(t *testing.T) {
 		t.Errorf("sentCount=%d, ожидалось 1", mock.sentCount)
 	}
 	if !got.Reference.Valid || got.Reference.Int64 != 42 {
-		t.Errorf("reference=%v", got.Reference)
+		t.Errorf("reference=%v, ожидалось 42", got.Reference)
 	}
 }
 
 func TestSendLoopError(t *testing.T) {
 	mock := newMockModem()
-	// Permanent error — retry не поможет.
 	mock.sendErr = &modem.ATError{Line: "+CMS ERROR: 305"}
 	svc, store := newTestService(t, mock)
 
@@ -178,7 +187,6 @@ func TestSendLoopError(t *testing.T) {
 
 func TestSendRetrySuccessOnSecondAttempt(t *testing.T) {
 	mock := newMockModem()
-	// Первая попытка — transient, вторая — успех.
 	mock.sendErrs = []error{
 		&modem.ATError{Line: "+CMS ERROR: 500"},
 		nil,
@@ -202,7 +210,6 @@ func TestSendRetrySuccessOnSecondAttempt(t *testing.T) {
 
 func TestSendRetryExhausted(t *testing.T) {
 	mock := newMockModem()
-	// Все попытки — transient.
 	mock.sendErrs = []error{
 		&modem.ATError{Line: "+CMS ERROR: 500"},
 		&modem.ATError{Line: "+CMS ERROR: 41"},
@@ -227,7 +234,6 @@ func TestSendRetryExhausted(t *testing.T) {
 
 func TestSendRetryPermanentNoRetry(t *testing.T) {
 	mock := newMockModem()
-	// Permanent — retry не должен срабатывать.
 	mock.sendErrs = []error{
 		&modem.ATError{Line: "+CMS ERROR: 305"},
 	}
@@ -432,14 +438,64 @@ func TestBackoffFor(t *testing.T) {
 		attempt int
 		want    time.Duration
 	}{
-		{1, 1 * time.Second}, // пауза перед 2-й попыткой
-		{2, 5 * time.Second}, // пауза перед 3-й попыткой
-		{3, 0},               // после последней — паузы нет
+		{1, 1 * time.Second},
+		{2, 5 * time.Second},
+		{3, 0},
 	}
 	for _, c := range cases {
 		got := svc.backoffFor(c.attempt)
 		if got != c.want {
 			t.Errorf("backoffFor(%d)=%v, ожидалось %v", c.attempt, got, c.want)
 		}
+	}
+}
+
+// ==================== Multipart ====================
+
+func TestSendMultipartReservesAllReferences(t *testing.T) {
+	mock := newMockModem()
+	mock.sendResult = modem.SendResult{
+		Parts:      2,
+		Reference:  10,
+		References: []int64{10, 11},
+		RawPDUs:    []string{"AA", "BB"},
+	}
+	svc, store := newTestService(t, mock)
+
+	id := putQueued(t, store, "+37121234567", "long")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	_ = svc.Run(ctx)
+
+	got, _ := store.GetMessage(context.Background(), id)
+	if got.Status != storage.StatusSent {
+		t.Errorf("status=%q, ожидалось sent", got.Status)
+	}
+	if _, err := store.FindPendingReference(context.Background(), 10); err != nil {
+		t.Errorf("ref 10 не забронирован: %v", err)
+	}
+	if _, err := store.FindPendingReference(context.Background(), 11); err != nil {
+		t.Errorf("ref 11 не забронирован: %v", err)
+	}
+	if !got.Reference.Valid || got.Reference.Int64 != 10 {
+		t.Errorf("messages.reference=%v, ожидалось 10", got.Reference)
+	}
+}
+
+func TestSendMultipartPartialFailure(t *testing.T) {
+	mock := newMockModem()
+	mock.sendErr = &modem.ATError{Line: "+CMS ERROR: 305"}
+	svc, store := newTestService(t, mock)
+
+	id := putQueued(t, store, "+37121234567", "long")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	_ = svc.Run(ctx)
+
+	got, _ := store.GetMessage(context.Background(), id)
+	if got.Status != storage.StatusFailed {
+		t.Errorf("status=%q, ожидалось failed", got.Status)
 	}
 }
