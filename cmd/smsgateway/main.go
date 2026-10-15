@@ -18,6 +18,7 @@ import (
 	"github.com/ik-vidya/smsgateway/internal/config"
 	"github.com/ik-vidya/smsgateway/internal/logging"
 	"github.com/ik-vidya/smsgateway/internal/modem"
+	"github.com/ik-vidya/smsgateway/internal/notify"
 	"github.com/ik-vidya/smsgateway/internal/profiles"
 	"github.com/ik-vidya/smsgateway/internal/service"
 	"github.com/ik-vidya/smsgateway/internal/storage"
@@ -50,13 +51,7 @@ AT-совместимый GSM-модем. Предоставляет HTTP/JSON R
 Без подкоманды запускает сервис. Требуется флаг --config.
 
 Если SERIAL_PORT пуст или = "none", сервис запускается в режиме
-"без модема": API принимает сообщения в очередь, но не отправляет.
-
-Примеры:
-    smsgateway --config /etc/smsgateway/.env
-    smsgateway version
-    smsgateway migrate --config /etc/smsgateway/.env
-    smsgateway list-ports`,
+"без модема": API принимает сообщения в очередь, но не отправляет.`,
 	SilenceUsage:  true,
 	SilenceErrors: true,
 	RunE:          runService,
@@ -165,6 +160,28 @@ func runService(_ *cobra.Command, _ []string) error {
 		return err
 	}
 
+	// --- Notifier (Telegram или Noop) ---
+	var notifier notify.Notifier = notify.Noop{}
+	if cfg.TelegramBotToken != "" && cfg.TelegramChatID != "" {
+		tg, err := notify.NewTelegram(notify.TelegramConfig{
+			BotToken: cfg.TelegramBotToken,
+			ChatID:   cfg.TelegramChatID,
+			Logger:   logger,
+		})
+		if err != nil {
+			logger.Error("не удалось создать Telegram-нотификатор",
+				"err", err)
+		} else {
+			notifier = tg
+			logger.Info("Telegram-нотификатор активен")
+		}
+	}
+	defer func() {
+		if cerr := notifier.Close(); cerr != nil {
+			logger.Error("закрытие notifier", "err", cerr)
+		}
+	}()
+
 	logger.Info("запуск smsgateway",
 		"version", version,
 		"build_time", buildTime,
@@ -178,12 +195,16 @@ func runService(_ *cobra.Command, _ []string) error {
 		syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
+	// --- Инициализация БД ---
 	if err := ensureDir(cfg.DBPath); err != nil {
+		notifier.Notify(ctx, notify.LevelCritical, err)
 		return err
 	}
 	store, err := storage.Open(ctx, cfg.DBPath)
 	if err != nil {
-		return fmt.Errorf("открытие БД: %w", err)
+		err = fmt.Errorf("открытие БД: %w", err)
+		notifier.Notify(ctx, notify.LevelCritical, err)
+		return err
 	}
 	defer func() {
 		if cerr := store.Close(); cerr != nil {
@@ -197,6 +218,7 @@ func runService(_ *cobra.Command, _ []string) error {
 	}
 	go store.RunRetention(ctx, retentionPolicy, logger)
 
+	// --- Модем или режим без модема ---
 	var svc *service.Service
 	if cfg.SerialPort == "" || cfg.SerialPort == "none" {
 		logger.Warn("модем не сконфигурирован (SERIAL_PORT пуст) — режим без модема")
@@ -204,11 +226,14 @@ func runService(_ *cobra.Command, _ []string) error {
 			DeleteAfterRead: cfg.SMSDeleteAfterRead,
 			SelfNumber:      cfg.SelfNumber,
 			TestSMSTimeout:  cfg.TestSMSTimeout,
+			Notifier:        notifier,
 		})
 	} else {
 		profile, err := profiles.Get(cfg.ModemProfile)
 		if err != nil {
-			return fmt.Errorf("профиль модема: %w", err)
+			err = fmt.Errorf("профиль модема: %w", err)
+			notifier.Notify(ctx, notify.LevelCritical, err)
+			return err
 		}
 		logger.Info("профиль модема", "profile", profile.Name())
 
@@ -217,14 +242,18 @@ func runService(_ *cobra.Command, _ []string) error {
 			Baud: cfg.SerialBaud,
 		})
 		if err != nil {
-			return fmt.Errorf("открытие serial: %w", err)
+			err = fmt.Errorf("открытие serial: %w", err)
+			notifier.Notify(ctx, notify.LevelCritical, err)
+			return err
 		}
 
 		m, err := modem.NewModem(port, profile,
 			cfg.ModemCmdTimeout, slogAdapter{logger})
 		if err != nil {
 			_ = port.Close()
-			return fmt.Errorf("создание Modem: %w", err)
+			err = fmt.Errorf("создание Modem: %w", err)
+			notifier.Notify(ctx, notify.LevelCritical, err)
+			return err
 		}
 		defer func() {
 			if cerr := m.Close(); cerr != nil {
@@ -240,15 +269,18 @@ func runService(_ *cobra.Command, _ []string) error {
 			DeleteAfterRead: cfg.SMSDeleteAfterRead,
 			SelfNumber:      cfg.SelfNumber,
 			TestSMSTimeout:  cfg.TestSMSTimeout,
+			Notifier:        notifier,
 		})
 	}
 
+	// --- Сервис ---
 	svcErr := make(chan error, 1)
 	go func() {
 		svcErr <- svc.Run(ctx)
 	}()
 
-	apiServer := api.New(cfg, store, svc, logger)
+	// --- HTTP API ---
+	apiServer := api.New(cfg, store, svc, notifier, logger)
 	serverErr := make(chan error, 1)
 	go func() {
 		serverErr <- apiServer.Start()
@@ -265,6 +297,7 @@ func runService(_ *cobra.Command, _ []string) error {
 		}
 	case err := <-serverErr:
 		if err != nil {
+			notifier.Notify(ctx, notify.LevelCritical, err)
 			return fmt.Errorf("http server: %w", err)
 		}
 	case err := <-svcErr:

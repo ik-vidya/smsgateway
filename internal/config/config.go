@@ -170,6 +170,13 @@ func (c *Config) validate() error {
 		errs = append(errs, fmt.Errorf(
 			"LOG_FORMAT должен быть text|json, получено %q", c.LogFormat))
 	}
+	// Telegram: либо оба параметра, либо ни одного.
+	hasToken := strings.TrimSpace(c.TelegramBotToken) != ""
+	hasChat := strings.TrimSpace(c.TelegramChatID) != ""
+	if hasToken != hasChat {
+		errs = append(errs, errors.New(
+			"TELEGRAM_BOT_TOKEN и TELEGRAM_CHAT_ID должны быть заданы вместе"))
+	}
 	return errors.Join(errs...)
 }
 

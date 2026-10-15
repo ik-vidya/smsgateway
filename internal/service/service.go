@@ -12,6 +12,7 @@ import (
 
 	"github.com/ik-vidya/smsgateway/internal/diagnostics"
 	"github.com/ik-vidya/smsgateway/internal/modem"
+	"github.com/ik-vidya/smsgateway/internal/notify"
 	"github.com/ik-vidya/smsgateway/internal/storage"
 )
 
@@ -28,9 +29,10 @@ var DefaultSendBackoff = []time.Duration{
 
 // Service — координатор.
 type Service struct {
-	modem  Modem
-	store  *storage.Store
-	logger *slog.Logger
+	modem    Modem
+	store    *storage.Store
+	logger   *slog.Logger
+	notifier notify.Notifier
 
 	sendInterval    time.Duration
 	pendingInterval time.Duration
@@ -75,6 +77,8 @@ type Config struct {
 
 	SelfNumber     string
 	TestSMSTimeout time.Duration
+
+	Notifier notify.Notifier
 }
 
 func (c Config) withDefaults() Config {
@@ -102,6 +106,9 @@ func (c Config) withDefaults() Config {
 // New создаёт сервис.
 func New(m Modem, store *storage.Store, logger *slog.Logger, cfg Config) *Service {
 	cfg = cfg.withDefaults()
+	if cfg.Notifier == nil {
+		cfg.Notifier = notify.Noop{}
+	}
 	return &Service{
 		modem:           m,
 		store:           store,
@@ -114,6 +121,7 @@ func New(m Modem, store *storage.Store, logger *slog.Logger, cfg Config) *Servic
 		sendBackoff:     cfg.SendBackoff,
 		selfNumber:      cfg.SelfNumber,
 		testSMSTimeout:  cfg.TestSMSTimeout,
+		notifier:        cfg.Notifier,
 		startTime:       time.Now(),
 	}
 }
@@ -123,7 +131,9 @@ func (s *Service) Run(ctx context.Context) error {
 	s.logger.Info("service: запуск")
 
 	if err := s.modem.Init(ctx); err != nil {
-		return fmt.Errorf("инициализация модема: %w", err)
+		err = fmt.Errorf("инициализация модема: %w", err)
+		s.notifyCritical(ctx, err)
+		return err
 	}
 
 	s.wg.Add(3)
@@ -171,6 +181,23 @@ func (s *Service) ModemInfo() modem.Info {
 		return modem.Info{}
 	}
 	return s.modem.Info()
+}
+
+// notifyCritical отправляет критическую ошибку через Notifier.
+// Не блокирует вызывающего.
+func (s *Service) notifyCritical(ctx context.Context, err error) {
+	if s.notifier == nil || err == nil {
+		return
+	}
+	s.notifier.Notify(ctx, notify.LevelCritical, err)
+}
+
+// notifyWarning отправляет предупреждение через Notifier.
+func (s *Service) notifyWarning(ctx context.Context, err error) {
+	if s.notifier == nil || err == nil {
+		return
+	}
+	s.notifier.Notify(ctx, notify.LevelWarning, err)
 }
 
 // ==================== SendTestSMS ====================

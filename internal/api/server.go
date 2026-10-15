@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/ik-vidya/smsgateway/internal/config"
+	"github.com/ik-vidya/smsgateway/internal/notify"
 	"github.com/ik-vidya/smsgateway/internal/service"
 	"github.com/ik-vidya/smsgateway/internal/storage"
 )
@@ -20,23 +21,27 @@ type Server struct {
 	cfg       *config.Config
 	store     *storage.Store
 	svc       *service.Service
+	notifier  notify.Notifier
 	logger    *slog.Logger
 	http      *http.Server
 	startTime time.Time
 }
 
-// New создаёт сервер с готовыми маршрутами.
-func New(cfg *config.Config, store *storage.Store, svc *service.Service, logger *slog.Logger) *Server {
+// New создаёт сервер с готовыми маршрутами. notifier может быть nil.
+func New(cfg *config.Config, store *storage.Store, svc *service.Service,
+	notifier notify.Notifier, logger *slog.Logger) *Server {
+	if notifier == nil {
+		notifier = notify.Noop{}
+	}
 	s := &Server{
 		cfg:       cfg,
 		store:     store,
 		svc:       svc,
+		notifier:  notifier,
 		logger:    logger,
 		startTime: time.Now(),
 	}
 
-	// WriteTimeout должен быть больше TEST_SMS_TIMEOUT, иначе
-	// синхронный /test-sms отвалится раньше, чем сервис ответит.
 	writeTimeout := 5 * time.Minute
 	if cfg.TestSMSTimeout > 0 {
 		wt := cfg.TestSMSTimeout + 30*time.Second
