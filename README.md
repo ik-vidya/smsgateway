@@ -83,6 +83,8 @@ smsgateway migrate --config /path/to/.env   применить миграции 
 smsgateway list-ports                       список последовательных портов
 smsgateway gammu-outbox --config .env       разовый прогон outbox
 smsgateway gammu-outbox --config .env --dry-run  план без отправки
+smsgateway convert-gammu-config --from /etc/gammu-smsdrc
+smsgateway convert-gammu-config --from /etc/gammu-smsdrc --to my.env
 ```
 
 ## HTTP API
@@ -237,6 +239,24 @@ internal/api/         — HTTP-сервер, middleware, handlers
 (через `URCs()`). URC могут прийти в середине ответа на AT-команду
 (особенно на SIM800L), и без разделения каналов корректная работа
 невозможна. Подробнее — [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+## Миграция с gammu-smsd
+
+Если у вас уже работает `gammu-smsd`, его файловый бэкенд
+совместим с smsgateway. Чтобы перейти:
+
+```bash
+smsgateway convert-gammu-config --from /etc/gammu-smsdrc --to smsgateway.env
+```
+
+Конвертер прочитает `[gammu]` и `[smsd]`, выпишет совместимые
+опции и отчитается о том, что проигнорировано (флаг `--verbose`
+для полного списка). `MaxRetries` преобразуется в
+`GAMMU_OUTBOX_MAX_ATTEMPTS` по формуле N+1: в gammu-smsd это
+число повторов после первой попытки, у нас — общее число попыток.
+
+Поддерживается только `Connection = serial` или `at`. `irda` и
+`bluetooth` не поддерживаются.
 
 ## Связанные проекты
 

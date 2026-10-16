@@ -69,6 +69,7 @@ func init() {
 		cmdMigrate(),
 		cmdListPorts(),
 		cmdGammuOutbox(),
+		cmdConvertGammuConfig(),
 	)
 }
 
