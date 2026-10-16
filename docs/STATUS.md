@@ -86,14 +86,23 @@ error под `GAMMU_ROOT`. Форматы имён IN и все три форм�
 
 ### (удалено — Gammu реализован, см. «Реализовано»)
 
-### Web UI (B1 — каркас)
+### Web UI
 
 Сервер на `net/http` + `html/template` (embed). Локализация
-ru/lv/en (go-i18n/v2). Страницы: dashboard (статус модема,
-счётчики), compose (отправка SMS). Bootstrap 5.2 и htmx 2.0 —
-с CDN, CSP их разрешает; переход на embedded ассеты — позже.
-CSRF: SameSite=Lax на cookie + проверка Origin/Referer. Работает
-только при `WEBUI_AUTH_MODE=none`; OIDC — отдельный этап.
+ru/lv/en (go-i18n/v2). Bootstrap 5.2 и htmx 4.0 хранятся локально
+в `static/vendor` (скачиваются через `make fetch`), CSP —
+`default-src 'self'` без CDN. CSRF: SameSite=Lax на cookie +
+проверка Origin/Referer. Работает только при
+`WEBUI_AUTH_MODE=none`; OIDC — отдельный этап.
+
+Страницы:
+- `GET /` — dashboard: состояние модема, БД, uptime, счётчики;
+- `GET /inbox` — входящие с фильтрами (peer, status, since/until)
+  и пагинацией; htmx-фрагмент `messages-table` через
+  `HX-Request`;
+- `GET /outbox` — исходящие, те же фильтры и пагинация;
+- `GET /compose`, `POST /compose` — отправка;
+- `GET /lang/{code}` — переключение языка.
 
 ### Мультимодемность
 

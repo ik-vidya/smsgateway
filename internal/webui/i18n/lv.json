@@ -5,6 +5,8 @@
 
   "nav.dashboard": "Panelis",
   "nav.compose": "Rakstīt",
+  "nav.inbox": "Ienākošās",
+  "nav.outbox": "Izejošās",
   "nav.lang": "Valoda",
 
   "dashboard.title": "Vadības panelis",
@@ -42,5 +44,25 @@
   "compose.error.to_format": "Laukam 'Kam' jāsākas ar '+' un jābūt 5-20 rakstzīmes.",
   "compose.error.text_required": "Lauks 'Teksts' ir obligāts.",
   "compose.error.text_too_long": "Lauks 'Teksts' ir pārāk garš (maks. 4000).",
-  "compose.error.generic": "Neizdevās ievietot ziņu rindā."
+  "compose.error.generic": "Neizdevās ievietot ziņu rindā.",
+
+  "messages.inbox.title": "Ienākošās",
+  "messages.outbox.title": "Izejošās",
+  "messages.filters.peer": "Numurs",
+  "messages.filters.status": "Statuss",
+  "messages.filters.status_any": "— jebkurš —",
+  "messages.filters.since": "No",
+  "messages.filters.until": "Līdz",
+  "messages.filters.apply": "Filtrēt",
+  "messages.filters.reset": "Notīrīt",
+  "messages.col.id": "ID",
+  "messages.col.date": "Datums",
+  "messages.col.peer": "Numurs",
+  "messages.col.status": "Statuss",
+  "messages.col.text": "Teksts",
+  "messages.empty": "Ziņu nav.",
+  "messages.total": "Kopā",
+  "messages.page": "Lpp.",
+  "messages.prev": "Iepriekš",
+  "messages.next": "Tālāk"
 }

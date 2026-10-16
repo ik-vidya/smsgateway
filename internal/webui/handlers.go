@@ -4,12 +4,21 @@ package webui
 import (
 	"fmt"
 	"net/http"
+	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/ik-vidya/smsgateway/internal/storage"
 )
+
+const (
+	defaultMessagesLimit = 50
+	maxMessagesLimit     = 500
+)
+
+// ==================== dashboard ====================
 
 // handleDashboard — GET /.
 func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
@@ -23,10 +32,8 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	}
 	data["Counters"] = buildCounters(counts)
 
-	dbHealthy := true
 	data["DBPath"] = s.cfg.DBPath
-	data["DBHealthy"] = dbHealthy
-
+	data["DBHealthy"] = true
 	data["GammuEnabled"] = s.cfg.GammuEnabled()
 
 	if s.svc != nil {
@@ -64,6 +71,8 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	s.render(w, "dashboard", data)
 }
 
+// ==================== compose ====================
+
 // handleComposeForm — GET /compose.
 func (s *Server) handleComposeForm(w http.ResponseWriter, r *http.Request) {
 	data := s.baseData(r, "compose")
@@ -98,6 +107,10 @@ func (s *Server) handleComposeSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if s.svc == nil {
+		s.composeError(w, r, "compose.error.generic", to, text)
+		return
+	}
 	id, err := s.svc.EnqueueOutgoing(r.Context(), to, text)
 	if err != nil {
 		s.logger.Error("webui: EnqueueOutgoing", "err", err)
@@ -121,6 +134,130 @@ func (s *Server) composeError(w http.ResponseWriter, r *http.Request,
 	w.WriteHeader(http.StatusUnprocessableEntity)
 	s.render(w, "compose", data)
 }
+
+// ==================== messages (inbox / outbox) ====================
+
+// handleInbox — GET /inbox.
+func (s *Server) handleInbox(w http.ResponseWriter, r *http.Request) {
+	s.handleMessages(w, r, storage.DirectionIn)
+}
+
+// handleOutbox — GET /outbox.
+func (s *Server) handleOutbox(w http.ResponseWriter, r *http.Request) {
+	s.handleMessages(w, r, storage.DirectionOut)
+}
+
+func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request,
+	dir storage.Direction) {
+
+	page := "inbox"
+	basePath := "/inbox"
+	if dir == storage.DirectionOut {
+		page = "outbox"
+		basePath = "/outbox"
+	}
+
+	// Разбор фильтров. Даже при ошибке разбора рендерим страницу —
+	// просто с пустым списком и сообщением.
+	filters, ferr := parseMessagesFilters(r)
+
+	data := s.baseData(r, page)
+	data["Direction"] = string(dir)
+	data["BasePath"] = basePath
+	data["StatusOptions"] = allStatusOptions
+
+	if ferr != nil {
+		data["ErrorMessage"] = ferr.Error()
+		data["Items"] = []messageRow{}
+		data["Total"] = 0
+		data["Filters"] = messagesFilters{Limit: defaultMessagesLimit}
+		data["PageNumber"] = 1
+		data["TotalPages"] = 1
+		data["HasPrev"] = false
+		data["HasNext"] = false
+		data["PrevURL"] = basePath
+		data["NextURL"] = basePath
+		s.renderMessages(w, r, page, data)
+		return
+	}
+	data["ErrorMessage"] = ""
+	data["Filters"] = filters
+
+	items, total, err := s.store.ListMessages(r.Context(), storage.Filter{
+		Direction: dir,
+		Status:    filters.Status,
+		Peer:      filters.Peer,
+		Since:     filters.Since,
+		Until:     filters.Until,
+		Limit:     filters.Limit,
+		Offset:    filters.Offset,
+	})
+	if err != nil {
+		s.logger.Error("webui: ListMessages", "err", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	totalPages := (total + filters.Limit - 1) / filters.Limit
+	if totalPages < 1 {
+		totalPages = 1
+	}
+	pageNumber := (filters.Offset / filters.Limit) + 1
+
+	hasPrev := filters.Offset > 0
+	hasNext := filters.Offset+filters.Limit < total
+
+	prevURL := basePath
+	if hasPrev {
+		off := filters.Offset - filters.Limit
+		if off < 0 {
+			off = 0
+		}
+		prevURL = buildPaginationURL(basePath, filters, off)
+	}
+	nextURL := basePath
+	if hasNext {
+		nextURL = buildPaginationURL(basePath, filters,
+			filters.Offset+filters.Limit)
+	}
+
+	rows := make([]messageRow, 0, len(items))
+	for _, m := range items {
+		rows = append(rows, messageRow{
+			ID:        m.ID,
+			CreatedAt: m.CreatedAt,
+			Peer:      m.Peer,
+			Status:    m.Status,
+			StatusKey: statusLabelKey(m.Status),
+			Text:      m.Text,
+		})
+	}
+
+	data["Items"] = rows
+	data["Total"] = total
+	data["PageNumber"] = pageNumber
+	data["TotalPages"] = totalPages
+	data["HasPrev"] = hasPrev
+	data["HasNext"] = hasNext
+	data["PrevURL"] = prevURL
+	data["NextURL"] = nextURL
+
+	s.renderMessages(w, r, page, data)
+}
+
+// renderMessages выбирает layout или fragment по заголовку
+// HX-Request (htmx).
+func (s *Server) renderMessages(w http.ResponseWriter, r *http.Request,
+	page string, data map[string]any) {
+
+	if r.Header.Get("HX-Request") == "true" {
+		s.renderFragment(w, page, "messages-table", data)
+		return
+	}
+	s.render(w, page, data)
+}
+
+// ==================== lang ====================
 
 // handleLangSet — GET /lang/{code}.
 func (s *Server) handleLangSet(w http.ResponseWriter, r *http.Request) {
@@ -149,6 +286,111 @@ func (s *Server) isSupportedLang(code string) bool {
 	return false
 }
 
+// ==================== filters ====================
+
+// messagesFilters — разобранные параметры фильтрации.
+//
+// Поля SinceValue/UntilValue/StatusValue хранят исходные строки
+// из query — нужны для подстановки в форму и в URL пагинации.
+type messagesFilters struct {
+	Peer        string
+	Status      storage.Status
+	StatusValue string
+	Since       *time.Time
+	Until       *time.Time
+	SinceValue  string
+	UntilValue  string
+	Limit       int
+	Offset      int
+}
+
+// parseMessagesFilters разбирает query. Даты — в формате
+// YYYY-MM-DD (как отдаёт <input type="date">).
+//
+// Since — начало указанного дня (>= в SQL). Until — начало
+// СЛЕДУЮЩЕГО дня, потому что в storage.Filter применяется <.
+func parseMessagesFilters(r *http.Request) (messagesFilters, error) {
+	q := r.URL.Query()
+	f := messagesFilters{
+		Peer:  strings.TrimSpace(q.Get("peer")),
+		Limit: defaultMessagesLimit,
+	}
+
+	if s := strings.TrimSpace(q.Get("status")); s != "" {
+		f.Status = storage.Status(s)
+		f.StatusValue = s
+	}
+
+	if s := strings.TrimSpace(q.Get("since")); s != "" {
+		t, err := time.ParseInLocation("2006-01-02", s, time.Local)
+		if err != nil {
+			return f, fmt.Errorf("since: некорректная дата %q", s)
+		}
+		f.Since = &t
+		f.SinceValue = s
+	}
+
+	if s := strings.TrimSpace(q.Get("until")); s != "" {
+		t, err := time.ParseInLocation("2006-01-02", s, time.Local)
+		if err != nil {
+			return f, fmt.Errorf("until: некорректная дата %q", s)
+		}
+		t = t.Add(24 * time.Hour)
+		f.Until = &t
+		f.UntilValue = s
+	}
+
+	if s := strings.TrimSpace(q.Get("limit")); s != "" {
+		n, err := strconv.Atoi(s)
+		if err != nil || n < 1 {
+			return f, fmt.Errorf("limit: ожидается положительное число")
+		}
+		f.Limit = n
+	}
+	if f.Limit > maxMessagesLimit {
+		f.Limit = maxMessagesLimit
+	}
+
+	if s := strings.TrimSpace(q.Get("offset")); s != "" {
+		n, err := strconv.Atoi(s)
+		if err != nil || n < 0 {
+			return f, fmt.Errorf(
+				"offset: ожидается неотрицательное число")
+		}
+		f.Offset = n
+	}
+
+	return f, nil
+}
+
+// buildPaginationURL собирает URL с сохранением активных фильтров
+// и новым offset.
+func buildPaginationURL(basePath string, f messagesFilters, offset int) string {
+	v := url.Values{}
+	if f.Peer != "" {
+		v.Set("peer", f.Peer)
+	}
+	if f.StatusValue != "" {
+		v.Set("status", f.StatusValue)
+	}
+	if f.SinceValue != "" {
+		v.Set("since", f.SinceValue)
+	}
+	if f.UntilValue != "" {
+		v.Set("until", f.UntilValue)
+	}
+	if f.Limit != defaultMessagesLimit {
+		v.Set("limit", strconv.Itoa(f.Limit))
+	}
+	if offset > 0 {
+		v.Set("offset", strconv.Itoa(offset))
+	}
+	if len(v) == 0 {
+		return basePath
+	}
+	return basePath + "?" + v.Encode()
+}
+
 // ==================== view-типы ====================
 
 // CounterView — карточка счётчика в dashboard.
@@ -172,9 +414,43 @@ type ModemView struct {
 	NetworkText  string
 }
 
-// buildCounters превращает map[Status]int в упорядоченный срез
-// с локализованными подписями. Для отображения используем
-// фиксированный порядок статусов.
+// messageRow — строка таблицы inbox/outbox.
+type messageRow struct {
+	ID        int64
+	CreatedAt time.Time
+	Peer      string
+	Status    storage.Status
+	StatusKey string
+	Text      string
+}
+
+// statusOption — опция в select-фильтре статуса.
+type statusOption struct {
+	Value    string
+	LabelKey string
+}
+
+var allStatusOptions = []statusOption{
+	{"queued", "dashboard.status.queued"},
+	{"sending", "dashboard.status.sending"},
+	{"sent", "dashboard.status.sent"},
+	{"delivered", "dashboard.status.delivered"},
+	{"failed", "dashboard.status.failed"},
+	{"sent_no_dr", "dashboard.status.sent_no_dr"},
+	{"received", "dashboard.status.received"},
+}
+
+// statusLabelKey возвращает i18n-ключ для статуса.
+func statusLabelKey(st storage.Status) string {
+	for _, o := range allStatusOptions {
+		if o.Value == string(st) {
+			return o.LabelKey
+		}
+	}
+	return "dashboard.status.other"
+}
+
+// buildCounters превращает map[Status]int в упорядоченный срез.
 func buildCounters(counts map[storage.Status]int) []CounterView {
 	order := []struct {
 		status storage.Status
@@ -197,7 +473,6 @@ func buildCounters(counts map[storage.Status]int) []CounterView {
 		})
 		seen[o.status] = true
 	}
-	// Прочие статусы, если появятся.
 	var extra []storage.Status
 	for st := range counts {
 		if !seen[st] {

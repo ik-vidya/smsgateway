@@ -126,6 +126,8 @@ func (s *Server) routes() http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /{$}", s.handleDashboard)
+	mux.HandleFunc("GET /inbox", s.handleInbox)
+	mux.HandleFunc("GET /outbox", s.handleOutbox)
 	mux.HandleFunc("GET /compose", s.handleComposeForm)
 	mux.HandleFunc("POST /compose", s.handleComposeSubmit)
 	mux.HandleFunc("GET /lang/{code}", s.handleLangSet)
@@ -137,12 +139,22 @@ func (s *Server) routes() http.Handler {
 	return withSecurityHeaders(withCSRF(mux))
 }
 
+// pageFiles сопоставляет ключ страницы (используется в шаблонах и
+// в data["ActivePage"]) имени файла templates/<file>.html.
+//
+// inbox и outbox используют один и тот же файл messages.html.
+var pageFiles = map[string]string{
+	"dashboard": "dashboard",
+	"compose":   "compose",
+	"inbox":     "messages",
+	"outbox":    "messages",
+}
+
 // buildTemplates собирает по отдельному *template.Template на
 // каждую страницу: layout и partials переиспользуются, "content"
 // берётся из конкретной страницы.
 func buildTemplates() (map[string]*template.Template, error) {
-	pages := []string{"dashboard", "compose"}
-	out := make(map[string]*template.Template, len(pages))
+	out := make(map[string]*template.Template, len(pageFiles))
 
 	funcMap := template.FuncMap{
 		"T": translate,
@@ -152,19 +164,21 @@ func buildTemplates() (map[string]*template.Template, error) {
 			}
 			return b
 		},
+		"truncate": truncate,
+		"fmtTime":  fmtTime,
 	}
 
-	for _, page := range pages {
-		t := template.New(page).Funcs(funcMap)
+	for key, file := range pageFiles {
+		t := template.New(key).Funcs(funcMap)
 		parsed, err := t.ParseFS(templatesFS,
 			"templates/layout.html",
 			"templates/partials/*.html",
-			"templates/"+page+".html",
+			"templates/"+file+".html",
 		)
 		if err != nil {
-			return nil, fmt.Errorf("шаблон %s: %w", page, err)
+			return nil, fmt.Errorf("шаблон %s (%s): %w", key, file, err)
 		}
-		out[page] = parsed
+		out[key] = parsed
 	}
 	return out, nil
 }
@@ -187,6 +201,25 @@ func (s *Server) render(w http.ResponseWriter, page string,
 	}
 }
 
+// renderFragment рендерит только именованный фрагмент, без layout.
+// Используется для ответов на htmx-запросы.
+func (s *Server) renderFragment(w http.ResponseWriter, page, fragment string,
+	data map[string]any) {
+
+	tmpl, ok := s.templates[page]
+	if !ok {
+		s.logger.Error("webui: неизвестная страница", "page", page)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := tmpl.ExecuteTemplate(w, fragment, data); err != nil {
+		s.logger.Error("webui: execute fragment",
+			"page", page, "fragment", fragment, "err", err)
+	}
+}
+
 // baseData собирает общие поля для всех страниц.
 func (s *Server) baseData(r *http.Request, page string) map[string]any {
 	lang := detectLang(r, s.cfg.WebUISupported, s.cfg.WebUIDefaultLang)
@@ -201,8 +234,25 @@ func (s *Server) baseData(r *http.Request, page string) map[string]any {
 		"Lang":           lang,
 		"SupportedLangs": supported,
 		"Localizer":      loc,
-		"Page":           page,
+		"ActivePage":     page,
 		"Version":        s.version,
 		"Title":          page,
 	}
+}
+
+// truncate обрезает строку до n рун, добавляя многоточие.
+func truncate(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n]) + "…"
+}
+
+// fmtTime форматирует время для таблиц.
+func fmtTime(t time.Time) string {
+	if t.IsZero() {
+		return "—"
+	}
+	return t.Local().Format("2006-01-02 15:04:05")
 }

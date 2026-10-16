@@ -5,6 +5,8 @@
 
   "nav.dashboard": "Панель",
   "nav.compose": "Отправить",
+  "nav.inbox": "Входящие",
+  "nav.outbox": "Исходящие",
   "nav.lang": "Язык",
 
   "dashboard.title": "Панель управления",
@@ -42,5 +44,25 @@
   "compose.error.to_format": "Поле 'Кому' должно начинаться с '+' и быть 5-20 символов.",
   "compose.error.text_required": "Поле 'Текст' обязательно.",
   "compose.error.text_too_long": "Поле 'Текст' слишком длинное (макс 4000).",
-  "compose.error.generic": "Не удалось поставить сообщение в очередь."
+  "compose.error.generic": "Не удалось поставить сообщение в очередь.",
+
+  "messages.inbox.title": "Входящие",
+  "messages.outbox.title": "Исходящие",
+  "messages.filters.peer": "Номер",
+  "messages.filters.status": "Статус",
+  "messages.filters.status_any": "— любой —",
+  "messages.filters.since": "С даты",
+  "messages.filters.until": "По дату",
+  "messages.filters.apply": "Применить",
+  "messages.filters.reset": "Сбросить",
+  "messages.col.id": "ID",
+  "messages.col.date": "Дата",
+  "messages.col.peer": "Номер",
+  "messages.col.status": "Статус",
+  "messages.col.text": "Текст",
+  "messages.empty": "Сообщений нет.",
+  "messages.total": "Всего",
+  "messages.page": "Стр.",
+  "messages.prev": "Назад",
+  "messages.next": "Вперёд"
 }

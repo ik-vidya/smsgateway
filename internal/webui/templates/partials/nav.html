@@ -11,11 +11,19 @@
         <div class="collapse navbar-collapse" id="navMain">
             <ul class="navbar-nav me-auto">
                 <li class="nav-item">
-                    <a class="nav-link {{ if eq .Page "dashboard" }}active{{ end }}"
+                    <a class="nav-link {{ if eq .ActivePage "dashboard" }}active{{ end }}"
                        href="/">{{ T . "nav.dashboard" }}</a>
                 </li>
                 <li class="nav-item">
-                    <a class="nav-link {{ if eq .Page "compose" }}active{{ end }}"
+                    <a class="nav-link {{ if eq .ActivePage "inbox" }}active{{ end }}"
+                       href="/inbox">{{ T . "nav.inbox" }}</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link {{ if eq .ActivePage "outbox" }}active{{ end }}"
+                       href="/outbox">{{ T . "nav.outbox" }}</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link {{ if eq .ActivePage "compose" }}active{{ end }}"
                        href="/compose">{{ T . "nav.compose" }}</a>
                 </li>
             </ul>

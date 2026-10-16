@@ -1,0 +1,130 @@
+{{ define "content" -}}
+<h1>{{ if eq .Direction "in" }}{{ T . "messages.inbox.title" }}{{ else }}{{ T . "messages.outbox.title" }}{{ end }}</h1>
+
+{{ if .ErrorMessage }}
+<div class="alert alert-danger">{{ .ErrorMessage }}</div>
+{{ end }}
+
+<form class="row g-2 align-items-end mb-3"
+      hx-get="{{ .BasePath }}"
+      hx-target="#messages-table"
+      hx-push-url="true">
+
+    <div class="col-md-3">
+        <label for="peer" class="form-label small mb-1">{{ T . "messages.filters.peer" }}</label>
+        <input type="text" class="form-control form-control-sm"
+               id="peer" name="peer"
+               value="{{ .Filters.Peer }}"
+               placeholder="+371..." autocomplete="off">
+    </div>
+
+    <div class="col-md-2">
+        <label for="status" class="form-label small mb-1">{{ T . "messages.filters.status" }}</label>
+        <select class="form-select form-select-sm" id="status" name="status">
+            <option value="">{{ T . "messages.filters.status_any" }}</option>
+            {{ range .StatusOptions }}
+            <option value="{{ .Value }}" {{ if eq .Value $.Filters.StatusValue }}selected{{ end }}>{{ T $ .LabelKey }}</option>
+            {{ end }}
+        </select>
+    </div>
+
+    <div class="col-md-2">
+        <label for="since" class="form-label small mb-1">{{ T . "messages.filters.since" }}</label>
+        <input type="date" class="form-control form-control-sm"
+               id="since" name="since"
+               value="{{ .Filters.SinceValue }}">
+    </div>
+
+    <div class="col-md-2">
+        <label for="until" class="form-label small mb-1">{{ T . "messages.filters.until" }}</label>
+        <input type="date" class="form-control form-control-sm"
+               id="until" name="until"
+               value="{{ .Filters.UntilValue }}">
+    </div>
+
+    <div class="col-md-3">
+        <button type="submit" class="btn btn-sm btn-primary">
+            {{ T . "messages.filters.apply" }}
+        </button>
+        <a href="{{ .BasePath }}" class="btn btn-sm btn-outline-secondary">
+            {{ T . "messages.filters.reset" }}
+        </a>
+    </div>
+</form>
+
+<div id="messages-table">
+    {{ template "messages-table" . }}
+</div>
+{{- end }}
+
+{{ define "messages-table" -}}
+<div class="d-flex justify-content-between align-items-center mb-2">
+    <div class="text-muted small">
+        {{ T . "messages.total" }}: {{ .Total }}
+    </div>
+    {{ if gt .TotalPages 1 }}
+    <div class="text-muted small">
+        {{ T . "messages.page" }} {{ .PageNumber }} / {{ .TotalPages }}
+    </div>
+    {{ end }}
+</div>
+
+{{ if not .Items }}
+<div class="alert alert-secondary">{{ T . "messages.empty" }}</div>
+{{ else }}
+<div class="table-responsive">
+    <table class="table table-sm table-hover align-middle">
+        <thead class="table-light">
+            <tr>
+                <th style="width: 5em;">{{ T . "messages.col.id" }}</th>
+                <th style="width: 11em;">{{ T . "messages.col.date" }}</th>
+                <th style="width: 11em;">{{ T . "messages.col.peer" }}</th>
+                <th style="width: 9em;">{{ T . "messages.col.status" }}</th>
+                <th>{{ T . "messages.col.text" }}</th>
+            </tr>
+        </thead>
+        <tbody>
+            {{ range .Items }}
+            <tr>
+                <td><code>{{ .ID }}</code></td>
+                <td class="text-nowrap small">{{ fmtTime .CreatedAt }}</td>
+                <td><code>{{ .Peer }}</code></td>
+                <td><span class="badge bg-secondary">{{ T $ .StatusKey }}</span></td>
+                <td class="small">
+                    <details>
+                        <summary>{{ truncate .Text 120 }}</summary>
+                        <pre class="mt-2 mb-0 small">{{ .Text }}</pre>
+                    </details>
+                </td>
+            </tr>
+            {{ end }}
+        </tbody>
+    </table>
+</div>
+
+{{ if gt .TotalPages 1 }}
+<nav>
+    <ul class="pagination pagination-sm mb-0">
+        <li class="page-item {{ if not .HasPrev }}disabled{{ end }}">
+            {{ if .HasPrev }}
+            <a class="page-link" href="{{ .PrevURL }}"
+               hx-get="{{ .PrevURL }}" hx-target="#messages-table"
+               hx-push-url="true">{{ T . "messages.prev" }}</a>
+            {{ else }}
+            <span class="page-link">{{ T . "messages.prev" }}</span>
+            {{ end }}
+        </li>
+        <li class="page-item {{ if not .HasNext }}disabled{{ end }}">
+            {{ if .HasNext }}
+            <a class="page-link" href="{{ .NextURL }}"
+               hx-get="{{ .NextURL }}" hx-target="#messages-table"
+               hx-push-url="true">{{ T . "messages.next" }}</a>
+            {{ else }}
+            <span class="page-link">{{ T . "messages.next" }}</span>
+            {{ end }}
+        </li>
+    </ul>
+</nav>
+{{ end }}
+{{ end }}
+{{- end }}
