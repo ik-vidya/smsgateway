@@ -88,6 +88,7 @@ smsgateway convert-gammu-config --from /etc/gammu-smsdrc --to my.env
 smsgateway detect-modem                     найти модемы и их параметры
 smsgateway detect-modem --json              для скриптов
 smsgateway detect-modem --skip-at           без опроса модема
+smsgateway detect-modem --write-config .env вписать SERIAL_PORT в .env
 ```
 
 ### Несколько модемов на одной машине
@@ -103,7 +104,20 @@ smsgateway detect-modem
 # /dev/ttyUSB1  /dev/serial/by-id/usb-FTDI_FT232R_...-port0         0403:6001  012345678901234 SIMCOM_SIM800L
 ```
 
-Полученный STABLE-ID можно вписать в `SERIAL_PORT`:
+Полученный STABLE-ID можно вписать в `SERIAL_PORT` вручную — или
+поручить это команде:
+
+```bash
+smsgateway detect-modem --write-config .env
+```
+
+Команда найдёт модем (единственный — без вопросов, несколько —
+предложит выбрать), запишет в `SERIAL_PORT` наиболее стабильный
+путь (by-id → by-path → /dev/ttyUSB*), сохранив комментарии и
+остальные переменные в `.env`. Если ключ закомментирован —
+раскомментирует.
+
+Итог:
 
 ```
 SERIAL_PORT=/dev/serial/by-id/usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_0001-if00-port0
