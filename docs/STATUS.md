@@ -74,10 +74,10 @@ error под `GAMMU_ROOT`. Форматы имён IN и все три форм�
 
 ### CLI (`cmd/smsgateway`)
 
-Команды: `version`, `migrate`, `list-ports`, `gammu-outbox`,
-`convert-gammu-config`, сервис. Режим без модема
-(`SERIAL_PORT=none`). Telegram-нотификатор создаётся в `main`
-и передаётся в `service` и `api`.
+Команды: `version`, `migrate`, `list-ports`, `detect-modem`,
+`gammu-outbox`, `convert-gammu-config`, сервис. Режим без
+модема (`SERIAL_PORT=none`). Telegram-нотификатор создаётся
+в `main` и передаётся в `service` и `api`.
 
 ---
 
@@ -101,7 +101,7 @@ error под `GAMMU_ROOT`. Форматы имён IN и все три форм�
 1. Web UI (htmx 4 + Bootstrap 5.2 + i18n ru/lv/en + OIDC).
 2. Профили `quectel`, `telit`.
 3. Команда `probe` для автогенерации профилей.
-4. Команда `detect-modem` (udev-обнаружение порта).
+4. `detect-modem --write-config` и `--watch`.
 
 ---
 

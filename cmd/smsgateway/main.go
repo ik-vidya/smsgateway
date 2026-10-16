@@ -70,6 +70,7 @@ func init() {
 		cmdListPorts(),
 		cmdGammuOutbox(),
 		cmdConvertGammuConfig(),
+		cmdDetectModem(),
 	)
 }
 

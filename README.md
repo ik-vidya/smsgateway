@@ -85,6 +85,28 @@ smsgateway gammu-outbox --config .env       разовый прогон outbox
 smsgateway gammu-outbox --config .env --dry-run  план без отправки
 smsgateway convert-gammu-config --from /etc/gammu-smsdrc
 smsgateway convert-gammu-config --from /etc/gammu-smsdrc --to my.env
+smsgateway detect-modem                     найти модемы и их параметры
+smsgateway detect-modem --json              для скриптов
+smsgateway detect-modem --skip-at           без опроса модема
+```
+
+### Несколько модемов на одной машине
+
+`/dev/ttyUSB*` переезжает между перезагрузками, поэтому для
+конфига лучше использовать стабильные пути
+`/dev/serial/by-id/*`:
+
+```bash
+smsgateway detect-modem
+# PORT          STABLE-ID                                            VID:PID    IMEI            MODEL
+# /dev/ttyUSB0  /dev/serial/by-id/usb-Silicon_Labs_CP2102_...-port0  10C4:EA60  863584038586060 SIMCOM_SIM800L
+# /dev/ttyUSB1  /dev/serial/by-id/usb-FTDI_FT232R_...-port0         0403:6001  012345678901234 SIMCOM_SIM800L
+```
+
+Полученный STABLE-ID можно вписать в `SERIAL_PORT`:
+
+```
+SERIAL_PORT=/dev/serial/by-id/usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_0001-if00-port0
 ```
 
 ## HTTP API
