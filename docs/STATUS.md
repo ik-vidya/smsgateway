@@ -86,9 +86,14 @@ error под `GAMMU_ROOT`. Форматы имён IN и все три форм�
 
 ### (удалено — Gammu реализован, см. «Реализовано»)
 
-### Web UI
+### Web UI (B1 — каркас)
 
-`WEBUI_*` в конфиге есть, код отсутствует.
+Сервер на `net/http` + `html/template` (embed). Локализация
+ru/lv/en (go-i18n/v2). Страницы: dashboard (статус модема,
+счётчики), compose (отправка SMS). Bootstrap 5.2 и htmx 2.0 —
+с CDN, CSP их разрешает; переход на embedded ассеты — позже.
+CSRF: SameSite=Lax на cookie + проверка Origin/Referer. Работает
+только при `WEBUI_AUTH_MODE=none`; OIDC — отдельный этап.
 
 ### Мультимодемность
 

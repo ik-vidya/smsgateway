@@ -1,0 +1,34 @@
+{{ define "layout" -}}
+<!doctype html>
+<html lang="{{ .Lang }}">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ .Title }} — {{ T . "app.title" }}</title>
+
+    {{/* Bootstrap 5.2.3: см. static/vendor/bootstrap/ (make fetch) */}}
+    <link rel="stylesheet" href="/static/vendor/bootstrap/bootstrap.min.css">
+    <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+
+{{ template "nav" . }}
+
+<main class="container my-4">
+    {{ template "content" . }}
+</main>
+
+<footer class="container text-muted small my-4">
+    <hr>
+    {{ T . "app.title" }} — {{ T . "app.subtitle" }}.
+    {{ T . "app.footer.version" }}: <code>{{ .Version }}</code>
+</footer>
+
+{{/* Bootstrap bundle и htmx 4.0: см. static/vendor/ (make fetch) */}}
+<script src="/static/vendor/bootstrap/bootstrap.bundle.min.js"></script>
+<script src="/static/vendor/htmx/htmx.min.js"></script>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
+{{- end }}

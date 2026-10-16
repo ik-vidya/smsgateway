@@ -1,0 +1,25 @@
+body {
+    min-height: 100vh;
+    background: #f8f9fa;
+}
+
+main {
+    min-height: 60vh;
+}
+
+.navbar-brand {
+    font-weight: 600;
+    letter-spacing: 0.5px;
+}
+
+.card-header {
+    font-weight: 600;
+}
+
+dl.row dt {
+    font-weight: 500;
+}
+
+code {
+    word-break: break-all;
+}

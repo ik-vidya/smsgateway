@@ -23,6 +23,7 @@ import (
 	"github.com/ik-vidya/smsgateway/internal/profiles"
 	"github.com/ik-vidya/smsgateway/internal/service"
 	"github.com/ik-vidya/smsgateway/internal/storage"
+	"github.com/ik-vidya/smsgateway/internal/webui"
 )
 
 var (
@@ -337,6 +338,23 @@ func runService(_ *cobra.Command, _ []string) error {
 		serverErr <- apiServer.Start()
 	}()
 
+	// --- Web UI (опционально) ---
+	var webServer *webui.Server
+	webErr := make(chan error, 1)
+	if cfg.WebUIEnabled {
+		ws, err := webui.New(cfg, store, svc, logger, version)
+		if err != nil {
+			err = fmt.Errorf("web ui: %w", err)
+			notifier.Notify(ctx, notify.LevelCritical, err)
+			return err
+		}
+		webServer = ws
+		logger.Info("Web UI запущен", "addr", cfg.WebUIAddr)
+		go func() {
+			webErr <- webServer.Start()
+		}()
+	}
+
 	select {
 	case <-ctx.Done():
 		logger.Info("получен сигнал остановки")
@@ -346,10 +364,20 @@ func runService(_ *cobra.Command, _ []string) error {
 		if err := apiServer.Shutdown(shutdownCtx); err != nil {
 			logger.Error("shutdown api", "err", err)
 		}
+		if webServer != nil {
+			if err := webServer.Shutdown(shutdownCtx); err != nil {
+				logger.Error("shutdown web ui", "err", err)
+			}
+		}
 	case err := <-serverErr:
 		if err != nil {
 			notifier.Notify(ctx, notify.LevelCritical, err)
 			return fmt.Errorf("http server: %w", err)
+		}
+	case err := <-webErr:
+		if err != nil {
+			notifier.Notify(ctx, notify.LevelCritical, err)
+			return fmt.Errorf("web ui: %w", err)
 		}
 	case err := <-svcErr:
 		if err != nil {

@@ -1,0 +1,84 @@
+{{ define "content" -}}
+<h1>{{ T . "dashboard.title" }}</h1>
+
+<div class="row g-3 mt-2">
+    <div class="col-md-6">
+        <div class="card h-100">
+            <div class="card-header">{{ T . "dashboard.modem" }}</div>
+            <div class="card-body">
+                {{ if .Modem.Configured }}
+                    <p class="mb-2">
+                        <span class="badge bg-success">
+                            {{ T . "dashboard.modem.configured" }}
+                        </span>
+                        <code>{{ .Modem.Port }}</code>
+                        <span class="text-muted">({{ .Modem.Profile }})</span>
+                    </p>
+                    <dl class="row mb-0 small">
+                        <dt class="col-sm-4">{{ T . "dashboard.modem.manufacturer" }}</dt>
+                        <dd class="col-sm-8">{{ or .Modem.Manufacturer "—" }}</dd>
+                        <dt class="col-sm-4">{{ T . "dashboard.modem.model" }}</dt>
+                        <dd class="col-sm-8">{{ or .Modem.Model "—" }}</dd>
+                        <dt class="col-sm-4">{{ T . "dashboard.modem.revision" }}</dt>
+                        <dd class="col-sm-8">{{ or .Modem.Revision "—" }}</dd>
+                        <dt class="col-sm-4">{{ T . "dashboard.modem.imei" }}</dt>
+                        <dd class="col-sm-8"><code>{{ or .Modem.IMEI "—" }}</code></dd>
+                        <dt class="col-sm-4">{{ T . "dashboard.modem.signal" }}</dt>
+                        <dd class="col-sm-8">
+                            {{ .Modem.Signal }} / 31
+                            {{ if .Modem.DBM }}<span class="text-muted">({{ .Modem.DBM }} dBm)</span>{{ end }}
+                        </dd>
+                        <dt class="col-sm-4">{{ T . "dashboard.modem.network" }}</dt>
+                        <dd class="col-sm-8">{{ or .Modem.NetworkText (printf "status %d" .Modem.Network) }}</dd>
+                    </dl>
+                {{ else }}
+                    <p class="text-muted mb-0">{{ T . "dashboard.modem.not_configured" }}</p>
+                {{ end }}
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-6">
+        <div class="card h-100">
+            <div class="card-header">{{ T . "dashboard.db" }}</div>
+            <div class="card-body">
+                <p class="mb-2">
+                    <code>{{ .DBPath }}</code>
+                    {{ if .DBHealthy }}
+                        <span class="badge bg-success">ok</span>
+                    {{ else }}
+                        <span class="badge bg-danger">error</span>
+                    {{ end }}
+                </p>
+                <p class="mb-0 small text-muted">
+                    {{ T . "dashboard.uptime" }}: {{ .Uptime }}
+                </p>
+                <p class="mb-0 small text-muted mt-2">
+                    {{ T . "dashboard.gammu" }}:
+                    {{ if .GammuEnabled }}
+                        <span class="badge bg-success">{{ T . "dashboard.gammu.enabled" }}</span>
+                    {{ else }}
+                        <span class="badge bg-secondary">{{ T . "dashboard.gammu.disabled" }}</span>
+                    {{ end }}
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card mt-3">
+    <div class="card-header">{{ T . "dashboard.counters" }}</div>
+    <div class="card-body">
+        <div class="row g-3">
+            {{ range .Counters }}
+            <div class="col-6 col-md-3">
+                <div class="border rounded p-2 text-center">
+                    <div class="fs-4 fw-semibold">{{ .Count }}</div>
+                    <div class="small text-muted">{{ .Label }}</div>
+                </div>
+            </div>
+            {{ end }}
+        </div>
+    </div>
+</div>
+{{- end }}

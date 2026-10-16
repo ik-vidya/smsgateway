@@ -256,6 +256,23 @@ func (s *Service) notifyWarning(ctx context.Context, err error) {
 	s.notifier.Notify(ctx, notify.LevelWarning, err)
 }
 
+// EnqueueOutgoing создаёт исходящее сообщение и ставит его в
+// очередь отправки. Используется HTTP API и Web UI.
+//
+// Проверки формата — на вызывающем.
+func (s *Service) EnqueueOutgoing(ctx context.Context,
+	peer, text string) (int64, error) {
+
+	m := &storage.Message{
+		Direction: storage.DirectionOut,
+		Status:    storage.StatusQueued,
+		Source:    storage.SourceAPI,
+		Peer:      peer,
+		Text:      text,
+	}
+	return s.store.CreateMessage(ctx, m)
+}
+
 // ==================== SendTestSMS ====================
 
 // TestSMSResult — результат проверочной SMS.

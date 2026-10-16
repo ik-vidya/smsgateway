@@ -1,0 +1,26 @@
+{{ define "content" -}}
+<h1>{{ T . "compose.title" }}</h1>
+
+{{ if .Success }}
+<div class="alert alert-success">{{ T . "compose.success" }}</div>
+{{ end }}
+{{ if .ErrorMessage }}
+<div class="alert alert-danger">{{ .ErrorMessage }}</div>
+{{ end }}
+
+<form method="post" action="/compose" class="mt-3" style="max-width: 640px;">
+    <div class="mb-3">
+        <label for="to" class="form-label">{{ T . "compose.to" }}</label>
+        <input type="text" class="form-control" id="to" name="to"
+               value="{{ .To }}" required autocomplete="off">
+    </div>
+    <div class="mb-3">
+        <label for="text" class="form-label">{{ T . "compose.text" }}</label>
+        <textarea class="form-control" id="text" name="text"
+                  rows="5" maxlength="4000" required>{{ .Text }}</textarea>
+    </div>
+    <button type="submit" class="btn btn-primary">
+        {{ T . "compose.submit" }}
+    </button>
+</form>
+{{- end }}
