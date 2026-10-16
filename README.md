@@ -81,6 +81,8 @@ smsgateway -v                               показать версию
 smsgateway version                          показать версию
 smsgateway migrate --config /path/to/.env   применить миграции БД
 smsgateway list-ports                       список последовательных портов
+smsgateway gammu-outbox --config .env       разовый прогон outbox
+smsgateway gammu-outbox --config .env --dry-run  план без отправки
 ```
 
 ## HTTP API
@@ -208,9 +210,14 @@ curl -X POST \
 | `SMS_RETENTION` | Срок хранения: `7d`, `720h`, `1d12h`. Пусто — вечно |
 | `LOG_LEVEL` | `debug`, `info`, `warn`, `error` |
 | `LOG_FORMAT` | `text` или `json` |
+| `GAMMU_ROOT` | Корень Gammu file backend. Пусто — выключен |
+| `GAMMU_INBOX` / `_OUTBOX` / `_SENT` / `_ERROR` | Подкаталоги (по умолчанию inbox/outbox/sent/error) |
+| `GAMMU_INBOX_FORMAT` | `utf8` (default) / `unicode` / `standard` / `detail` |
+| `GAMMU_WATCH_INTERVAL` | Период сканирования outbox (по умолчанию 5s) |
+| `GAMMU_OUTBOX_MAX_ATTEMPTS` | Всего попыток отправки (по умолчанию 5) |
 
-Также в `.env` есть переменные для будущих функций (web-UI, Gammu,
-Telegram) — см. `.env.example`. Они пока не используются.
+Также в `.env` есть переменные для будущих функций (web-UI,
+Telegram) — см. `.env.example`.
 
 ## Архитектура
 

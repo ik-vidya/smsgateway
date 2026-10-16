@@ -62,20 +62,27 @@ URC-цикл, отправка с retry, pending references, `HandleDeliveryRepo
 `/healthz`, `/api/v1/status`, `/api/v1/messages` (CRUD),
 `/api/v1/test-sms`, `/api/v1/diagnostics`. Тесты: 21.
 
+### Gammu file backend (`internal/gammu`)
+
+Совместим с gammu-smsd Files backend. Каталоги inbox/outbox/sent/
+error под `GAMMU_ROOT`. Форматы имён IN и все три формы OUT с
+приоритетами A-Z. Автоопределение кодировки файла (UTF-8 default
+и fallback, UTF-16LE/BE с BOM). Watcher outbox с retry и
+понижением приоритета (`retries >= GAMMU_OUTBOX_MAX_ATTEMPTS`
+или приоритет Z → error). CLI: `gammu-outbox [--dry-run]`.
+Подробности — [GAMMU-FORMAT.md](GAMMU-FORMAT.md).
+
 ### CLI (`cmd/smsgateway`)
 
-Команды: `version`, `migrate`, `list-ports`, сервис. Режим без
-модема (`SERIAL_PORT=none`). Telegram-нотификатор создаётся в
-`main` и передаётся в `service` и `api`.
+Команды: `version`, `migrate`, `list-ports`, `gammu-outbox`,
+сервис. Режим без модема (`SERIAL_PORT=none`). Telegram-нотификатор
+создаётся в `main` и передаётся в `service` и `api`.
 
 ---
 
 ## В процессе / частично
 
-### Gammu file backend
-
-`FILES_BACKEND_DIR`, `GAMMU_IMPORT_DIR`, `GAMMU_IMPORT_INTERVAL`
-в конфиге есть, код отсутствует.
+### (удалено — Gammu реализован, см. «Реализовано»)
 
 ### Web UI
 
@@ -90,10 +97,11 @@ URC-цикл, отправка с retry, pending references, `HandleDeliveryRepo
 
 ## Другие запланированные задачи
 
-1. Gammu file backend — импорт/экспорт.
-2. Web UI (htmx 4 + Bootstrap 5.2 + i18n ru/lv/en + OIDC).
+1. Web UI (htmx 4 + Bootstrap 5.2 + i18n ru/lv/en + OIDC).
+2. Конвертер `gammu-smsdrc` → `.env` (частичная совместимость).
 3. Профили `quectel`, `telit`.
 4. Команда `probe` для автогенерации профилей.
+5. Команда `detect-modem` (udev-обнаружение порта).
 
 ---
 

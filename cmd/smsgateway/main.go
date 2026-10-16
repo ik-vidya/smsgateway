@@ -16,6 +16,7 @@ import (
 
 	"github.com/ik-vidya/smsgateway/internal/api"
 	"github.com/ik-vidya/smsgateway/internal/config"
+	"github.com/ik-vidya/smsgateway/internal/gammu"
 	"github.com/ik-vidya/smsgateway/internal/logging"
 	"github.com/ik-vidya/smsgateway/internal/modem"
 	"github.com/ik-vidya/smsgateway/internal/notify"
@@ -67,6 +68,7 @@ func init() {
 		cmdVersion(),
 		cmdMigrate(),
 		cmdListPorts(),
+		cmdGammuOutbox(),
 	)
 }
 
@@ -219,15 +221,13 @@ func runService(_ *cobra.Command, _ []string) error {
 	go store.RunRetention(ctx, retentionPolicy, logger)
 
 	// --- Модем или режим без модема ---
-	var svc *service.Service
+	var (
+		serviceModem service.Modem // для service
+		realModem    *modem.Modem  // nil в режиме без модема
+	)
 	if cfg.SerialPort == "" || cfg.SerialPort == "none" {
 		logger.Warn("модем не сконфигурирован (SERIAL_PORT пуст) — режим без модема")
-		svc = service.New(nopModem{}, store, logger, service.Config{
-			DeleteAfterRead: cfg.SMSDeleteAfterRead,
-			SelfNumber:      cfg.SelfNumber,
-			TestSMSTimeout:  cfg.TestSMSTimeout,
-			Notifier:        notifier,
-		})
+		serviceModem = nopModem{}
 	} else {
 		profile, err := profiles.Get(cfg.ModemProfile)
 		if err != nil {
@@ -265,15 +265,64 @@ func runService(_ *cobra.Command, _ []string) error {
 			m.SetPIN(cfg.ModemPIN)
 		}
 
-		svc = service.New(m, store, logger, service.Config{
-			DeleteAfterRead: cfg.SMSDeleteAfterRead,
-			SelfNumber:      cfg.SelfNumber,
-			TestSMSTimeout:  cfg.TestSMSTimeout,
-			Notifier:        notifier,
-		})
+		serviceModem = m
+		realModem = m
+	}
+
+	// --- Gammu Manager (опционально) ---
+	var gammuMgr *gammu.Manager
+	if cfg.GammuEnabled() {
+		inbox, err := gammu.NewInboxWriter(
+			cfg.GammuInboxPath(), cfg.GammuInboxFormat, logger)
+		if err != nil {
+			err = fmt.Errorf("gammu inbox: %w", err)
+			notifier.Notify(ctx, notify.LevelCritical, err)
+			return err
+		}
+
+		var sender gammu.Sender
+		if realModem != nil {
+			sender = service.NewModemSender(realModem, logger)
+		}
+		outboxStore := service.NewStorageOutboxStore(store)
+
+		gammuMgr, err = gammu.NewManager(gammu.ManagerConfig{
+			InboxDir:      cfg.GammuInboxPath(),
+			OutboxDir:     cfg.GammuOutboxPath(),
+			SentDir:       cfg.GammuSentPath(),
+			ErrorDir:      cfg.GammuErrorPath(),
+			InboxFormat:   cfg.GammuInboxFormat,
+			WatchInterval: cfg.GammuWatchInterval,
+			MaxAttempts:   cfg.GammuOutboxMaxAttempts,
+		}, sender, outboxStore, inbox, logger)
+		if err != nil {
+			err = fmt.Errorf("gammu manager: %w", err)
+			notifier.Notify(ctx, notify.LevelCritical, err)
+			return err
+		}
+
+		logger.Info("gammu: файловый бэкенд активен",
+			"root", cfg.GammuRoot,
+			"inbox", cfg.GammuInboxPath(),
+			"outbox", cfg.GammuOutboxPath(),
+			"sent", cfg.GammuSentPath(),
+			"error", cfg.GammuErrorPath(),
+			"format", cfg.GammuInboxFormat,
+			"watch_interval", cfg.GammuWatchInterval,
+			"max_attempts", cfg.GammuOutboxMaxAttempts,
+			"sender", realModem != nil,
+		)
 	}
 
 	// --- Сервис ---
+	svc := service.New(serviceModem, store, logger, service.Config{
+		DeleteAfterRead: cfg.SMSDeleteAfterRead,
+		SelfNumber:      cfg.SelfNumber,
+		TestSMSTimeout:  cfg.TestSMSTimeout,
+		Notifier:        notifier,
+		Gammu:           gammuMgr,
+	})
+
 	svcErr := make(chan error, 1)
 	go func() {
 		svcErr <- svc.Run(ctx)
