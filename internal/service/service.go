@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/ik-vidya/smsgateway/internal/diagnostics"
+	"github.com/ik-vidya/smsgateway/internal/gammu"
 	"github.com/ik-vidya/smsgateway/internal/modem"
 	"github.com/ik-vidya/smsgateway/internal/notify"
 	"github.com/ik-vidya/smsgateway/internal/storage"
@@ -33,6 +34,10 @@ type Service struct {
 	store    *storage.Store
 	logger   *slog.Logger
 	notifier notify.Notifier
+
+	// gammu опционален: nil, если GAMMU_ROOT не задан или
+	// файловый бэкенд отключён.
+	gammu *gammu.Manager
 
 	sendInterval    time.Duration
 	pendingInterval time.Duration
@@ -79,6 +84,11 @@ type Config struct {
 	TestSMSTimeout time.Duration
 
 	Notifier notify.Notifier
+
+	// Gammu — опциональный менеджер файлового бэкенда.
+	// Если задан, Service.Run запускает его watcher и
+	// экспортирует принятые SMS в inbox.
+	Gammu *gammu.Manager
 }
 
 func (c Config) withDefaults() Config {
@@ -122,6 +132,7 @@ func New(m Modem, store *storage.Store, logger *slog.Logger, cfg Config) *Servic
 		selfNumber:      cfg.SelfNumber,
 		testSMSTimeout:  cfg.TestSMSTimeout,
 		notifier:        cfg.Notifier,
+		gammu:           cfg.Gammu,
 		startTime:       time.Now(),
 	}
 }
@@ -136,10 +147,22 @@ func (s *Service) Run(ctx context.Context) error {
 		return err
 	}
 
+	// Восстановление «сирот»: сообщения source='gammu-outbox'
+	// без записи в gammu_outbox (сервис упал между записью в БД
+	// и созданием entry). Переводим их в failed.
+	if s.gammu != nil {
+		s.recoverGammuOrphans(ctx)
+	}
+
 	s.wg.Add(3)
 	go s.urcLoop(ctx)
 	go s.sendLoop(ctx)
 	go s.pendingLoop(ctx)
+
+	if s.gammu != nil {
+		s.wg.Add(1)
+		go s.gammuLoop(ctx)
+	}
 
 	<-ctx.Done()
 	s.logger.Info("service: остановка, ждём горутины")
@@ -156,6 +179,39 @@ func (s *Service) Run(ctx context.Context) error {
 		s.logger.Warn("service: таймаут ожидания горутин")
 	}
 	return nil
+}
+
+// gammuLoop запускает watcher gammu.Manager и ждёт его завершения
+// вместе с остальными горутинами Service.
+func (s *Service) gammuLoop(ctx context.Context) {
+	defer s.wg.Done()
+	s.logger.Info("service: gammu manager запущен")
+	if err := s.gammu.Run(ctx); err != nil {
+		s.logger.Error("service: gammu manager завершился с ошибкой",
+			"err", err)
+		s.notifyWarning(ctx, err)
+	}
+	s.logger.Info("service: gammu manager остановлен")
+}
+
+// recoverGammuOrphans переводит в failed исходящие сообщения
+// source='gammu-outbox' без соответствующей записи в gammu_outbox.
+// Вызывается один раз при старте Run.
+func (s *Service) recoverGammuOrphans(ctx context.Context) {
+	orphans, err := s.store.OrphanOutboxMessages(ctx)
+	if err != nil {
+		s.logger.Warn("service: OrphanOutboxMessages", "err", err)
+		return
+	}
+	for _, m := range orphans {
+		s.logger.Warn("service: gammu-сирота, помечаю failed",
+			"id", m.ID, "peer", m.Peer)
+		if err := s.store.MarkFailed(ctx, m.ID,
+			"файл outbox потерян (сервис перезапущен)"); err != nil {
+			s.logger.Warn("service: MarkFailed для сироты",
+				"id", m.ID, "err", err)
+		}
+	}
 }
 
 // Uptime — время с момента старта.
@@ -411,6 +467,10 @@ func (s *Service) ingestSMS(ctx context.Context, index int) error {
 	}
 	s.logger.Info("service: SMS сохранено",
 		"id", id, "peer", target.Peer, "len", len(target.Text))
+
+	// Экспорт в Gammu inbox (если файловый бэкенд активен).
+	// Ошибка файла не блокирует приём — БД уже обновлена.
+	s.writeToGammuInbox(target, id)
 
 	if s.deleteAfterRead {
 		if err := s.modem.DeleteSMS(ctx, index); err != nil {
