@@ -244,3 +244,196 @@ func TestRetention(t *testing.T) {
 		t.Errorf("после retention осталось %d, ожидалось 1", total)
 	}
 }
+
+// ==================== gammu_outbox ====================
+
+func TestOutboxEntryCRUD(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	msgID, err := s.CreateMessage(ctx, &Message{
+		Direction: DirectionOut, Status: StatusQueued,
+		Source: SourceGammuOutbox,
+		Peer:   "+37121234567", Text: "hi",
+	})
+	if err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
+
+	e := &OutboxEntry{
+		Path:      "/tmp/outbox/OUTA_+37121234567_00.txt",
+		MessageID: msgID,
+		Priority:  "A",
+	}
+	if err := s.CreateOutboxEntry(ctx, e); err != nil {
+		t.Fatalf("CreateOutboxEntry: %v", err)
+	}
+
+	got, err := s.GetOutboxEntry(ctx, e.Path)
+	if err != nil {
+		t.Fatalf("GetOutboxEntry: %v", err)
+	}
+	if got.MessageID != msgID || got.Priority != "A" || got.Retries != 0 {
+		t.Errorf("got %+v", got)
+	}
+
+	// Понижение приоритета и переименование.
+	newPath := "/tmp/outbox/OUTB_+37121234567_00.txt"
+	if err := s.UpdateOutboxAfterFailure(ctx, e.Path, newPath,
+		1, "B", "timeout"); err != nil {
+		t.Fatalf("UpdateOutboxAfterFailure: %v", err)
+	}
+
+	got, err = s.GetOutboxEntry(ctx, newPath)
+	if err != nil {
+		t.Fatalf("GetOutboxEntry (new path): %v", err)
+	}
+	if got.Retries != 1 || got.Priority != "B" || got.LastError != "timeout" {
+		t.Errorf("после обновления: %+v", got)
+	}
+
+	// Старый путь больше не существует.
+	if _, err := s.GetOutboxEntry(ctx, e.Path); !errors.Is(err, ErrOutboxEntryNotFound) {
+		t.Errorf("старый путь: ожидалось ErrOutboxEntryNotFound, получено %v", err)
+	}
+
+	// Удаление.
+	if err := s.DeleteOutboxEntry(ctx, newPath); err != nil {
+		t.Fatalf("DeleteOutboxEntry: %v", err)
+	}
+	if _, err := s.GetOutboxEntry(ctx, newPath); !errors.Is(err, ErrOutboxEntryNotFound) {
+		t.Errorf("после удаления: ожидалось ErrOutboxEntryNotFound")
+	}
+}
+
+func TestOutboxListOrder(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	mk := func(prio, path string) {
+		msgID, _ := s.CreateMessage(ctx, &Message{
+			Direction: DirectionOut, Status: StatusQueued,
+			Source: SourceGammuOutbox, Peer: "+371", Text: "x",
+		})
+		if err := s.CreateOutboxEntry(ctx, &OutboxEntry{
+			Path: path, MessageID: msgID, Priority: prio,
+		}); err != nil {
+			t.Fatalf("CreateOutboxEntry(%s): %v", path, err)
+		}
+	}
+	mk("C", "/o/OUTС1.txt")
+	mk("A", "/o/OUTA2.txt")
+	mk("A", "/o/OUTA1.txt")
+	mk("B", "/o/OUTB1.txt")
+
+	list, err := s.ListOutboxEntries(ctx)
+	if err != nil {
+		t.Fatalf("ListOutboxEntries: %v", err)
+	}
+	if len(list) != 4 {
+		t.Fatalf("len=%d, ожидалось 4", len(list))
+	}
+	want := []string{
+		"/o/OUTA1.txt", "/o/OUTA2.txt",
+		"/o/OUTB1.txt", "/o/OUTС1.txt",
+	}
+	for i, e := range list {
+		if e.Path != want[i] {
+			t.Errorf("[%d] path=%q, ожидалось %q", i, e.Path, want[i])
+		}
+	}
+}
+
+func TestOrphanOutboxMessages(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	// Сирота: source='gammu-outbox', status='queued', нет записи в gammu_outbox.
+	orphanID, _ := s.CreateMessage(ctx, &Message{
+		Direction: DirectionOut, Status: StatusQueued,
+		Source: SourceGammuOutbox, Peer: "+371111", Text: "orphan",
+	})
+
+	// Нормальное: есть запись в gammu_outbox.
+	okID, _ := s.CreateMessage(ctx, &Message{
+		Direction: DirectionOut, Status: StatusQueued,
+		Source: SourceGammuOutbox, Peer: "+372222", Text: "ok",
+	})
+	if err := s.CreateOutboxEntry(ctx, &OutboxEntry{
+		Path: "/o/OUTA_372222_00.txt", MessageID: okID, Priority: "A",
+	}); err != nil {
+		t.Fatalf("CreateOutboxEntry: %v", err)
+	}
+
+	// Не из gammu — не считается сиротой.
+	_, _ = s.CreateMessage(ctx, &Message{
+		Direction: DirectionOut, Status: StatusQueued,
+		Source: SourceAPI, Peer: "+373333", Text: "api",
+	})
+
+	orphans, err := s.OrphanOutboxMessages(ctx)
+	if err != nil {
+		t.Fatalf("OrphanOutboxMessages: %v", err)
+	}
+	if len(orphans) != 1 {
+		t.Fatalf("len=%d, ожидалось 1", len(orphans))
+	}
+	if orphans[0].ID != orphanID {
+		t.Errorf("id=%d, ожидалось %d", orphans[0].ID, orphanID)
+	}
+}
+
+func TestMessageSourceRoundtrip(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	id, err := s.CreateMessage(ctx, &Message{
+		Direction: DirectionOut, Status: StatusQueued,
+		Source: SourceGammuOutbox,
+		Peer:   "+37121234567", Text: "hello",
+	})
+	if err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
+	got, err := s.GetMessage(ctx, id)
+	if err != nil {
+		t.Fatalf("GetMessage: %v", err)
+	}
+	if got.Source != SourceGammuOutbox {
+		t.Errorf("Source=%q, ожидалось %q", got.Source, SourceGammuOutbox)
+	}
+
+	// Фильтр по source.
+	list, total, err := s.ListMessages(ctx, Filter{Source: SourceGammuOutbox})
+	if err != nil {
+		t.Fatalf("ListMessages: %v", err)
+	}
+	if total != 1 || len(list) != 1 {
+		t.Errorf("total=%d len=%d, ожидалось 1/1", total, len(list))
+	}
+
+	// Не тот source — пусто.
+	_, total, _ = s.ListMessages(ctx, Filter{Source: SourceAPI})
+	if total != 0 {
+		t.Errorf("total=%d, ожидалось 0", total)
+	}
+}
+
+func TestCreateMessageHonorsCreatedAt(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	custom := time.Date(2026, 10, 15, 12, 0, 34, 0, time.UTC)
+	id, err := s.CreateMessage(ctx, &Message{
+		Direction: DirectionIn, Status: StatusReceived,
+		Peer: "+37121234567", Text: "gammu import",
+		CreatedAt: custom,
+	})
+	if err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
+	got, _ := s.GetMessage(ctx, id)
+	if !got.CreatedAt.Equal(custom) {
+		t.Errorf("CreatedAt=%v, ожидалось %v", got.CreatedAt, custom)
+	}
+}

@@ -31,23 +31,26 @@ func (s *Store) CreateMessage(ctx context.Context, m *Message) (int64, error) {
 	}
 
 	now := nowUTC()
-	m.CreatedAt = now
+	if m.CreatedAt.IsZero() {
+		m.CreatedAt = now
+	}
 	m.UpdatedAt = now
 
 	res, err := s.db.ExecContext(ctx, `
 		INSERT INTO messages (
-			direction, status, peer, text, raw_pdu,
+			direction, status, source, peer, text, raw_pdu,
 			reference, tp_mr, retry_count, error,
 			queued_at, sent_at, delivered_at,
 			created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
-		string(m.Direction), string(m.Status), m.Peer,
+		string(m.Direction), string(m.Status),
+		nullString(string(m.Source)), m.Peer,
 		nullString(m.Text), nullString(m.RawPDU),
 		m.Reference, m.TPMR, m.RetryCount,
 		nullString(m.Error),
 		m.QueuedAt, m.SentAt, m.DeliveredAt,
-		now, now,
+		m.CreatedAt, now,
 	)
 	if err != nil {
 		return 0, fmt.Errorf("INSERT messages: %w", err)
@@ -63,10 +66,7 @@ func (s *Store) CreateMessage(ctx context.Context, m *Message) (int64, error) {
 // GetMessage возвращает сообщение по ID.
 func (s *Store) GetMessage(ctx context.Context, id int64) (*Message, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, direction, status, peer, text, raw_pdu,
-		       reference, tp_mr, retry_count, error,
-		       queued_at, sent_at, delivered_at,
-		       created_at, updated_at
+		SELECT `+messageColumns+`
 		  FROM messages WHERE id = ?
 	`, id)
 	m, err := scanMessage(row)
@@ -104,10 +104,7 @@ func (s *Store) ListMessages(ctx context.Context, f Filter) ([]*Message, int, er
 		offset = 0
 	}
 
-	query := `SELECT id, direction, status, peer, text, raw_pdu,
-	                 reference, tp_mr, retry_count, error,
-	                 queued_at, sent_at, delivered_at,
-	                 created_at, updated_at
+	query := `SELECT ` + messageColumns + `
 	            FROM messages ` + where + `
 	           ORDER BY created_at DESC, id DESC
 	           LIMIT ? OFFSET ?`
@@ -145,6 +142,10 @@ func buildWhere(f Filter) (string, []any) {
 	if f.Status != "" {
 		conds = append(conds, "status = ?")
 		args = append(args, string(f.Status))
+	}
+	if f.Source != "" {
+		conds = append(conds, "source = ?")
+		args = append(args, string(f.Source))
 	}
 	if f.Peer != "" {
 		conds = append(conds, "peer LIKE ?")
@@ -322,13 +323,20 @@ type rowScanner interface {
 	Scan(dest ...any) error
 }
 
+// messageColumns — единый список колонок для SELECT из messages.
+// Порядок ДОЛЖЕН совпадать с scanMessage.
+const messageColumns = `id, direction, status, source, peer, text, raw_pdu,
+	reference, tp_mr, retry_count, error,
+	queued_at, sent_at, delivered_at,
+	created_at, updated_at`
+
 func scanMessage(sc rowScanner) (*Message, error) {
 	var m Message
 	var direction, status string
-	var text, rawPDU, errMsg sql.NullString
+	var source, text, rawPDU, errMsg sql.NullString
 
 	if err := sc.Scan(
-		&m.ID, &direction, &status, &m.Peer, &text, &rawPDU,
+		&m.ID, &direction, &status, &source, &m.Peer, &text, &rawPDU,
 		&m.Reference, &m.TPMR, &m.RetryCount, &errMsg,
 		&m.QueuedAt, &m.SentAt, &m.DeliveredAt,
 		&m.CreatedAt, &m.UpdatedAt,
@@ -337,6 +345,7 @@ func scanMessage(sc rowScanner) (*Message, error) {
 	}
 	m.Direction = Direction(direction)
 	m.Status = Status(status)
+	m.Source = Source(source.String)
 	m.Text = text.String
 	m.RawPDU = rawPDU.String
 	m.Error = errMsg.String

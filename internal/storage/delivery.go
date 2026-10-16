@@ -63,10 +63,7 @@ func (s *Store) applyDeliveryToMessage(ctx context.Context, id int64, tpst int, 
 // Возвращает ErrMessageNotFound, если не найдено.
 func (s *Store) FindMessageByReference(ctx context.Context, reference int64) (*Message, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, direction, status, peer, text, raw_pdu,
-		       reference, tp_mr, retry_count, error,
-		       queued_at, sent_at, delivered_at,
-		       created_at, updated_at
+		SELECT `+messageColumns+`
 		  FROM messages
 		 WHERE reference = ? AND direction = 'out'
 		 ORDER BY created_at DESC LIMIT 1

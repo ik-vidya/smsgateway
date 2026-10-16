@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -32,9 +33,18 @@ type Config struct {
 	SMSRetention time.Duration
 
 	// Gammu file backend
-	FilesBackendDir     string
-	GammuImportDir      string
-	GammuImportInterval time.Duration
+	//
+	// Активируется, если GammuRoot не пуст. Inbox/Outbox/Sent/Error —
+	// подкаталоги, относительные пути склеиваются с GammuRoot.
+	// Абсолютные пути используются как есть.
+	GammuRoot              string
+	GammuInbox             string
+	GammuOutbox            string
+	GammuSent              string
+	GammuError             string
+	GammuInboxFormat       string        // standard | unicode | utf8 | detail
+	GammuWatchInterval     time.Duration // период сканирования outbox
+	GammuOutboxMaxAttempts int           // всего попыток отправки, включая первую
 
 	// Logging
 	LogLevel  string
@@ -72,8 +82,12 @@ func Load(path string) (*Config, error) {
 		ModemStorage:     os.Getenv("MODEM_STORAGE"),
 		ModemPIN:         os.Getenv("MODEM_PIN"),
 		DBPath:           os.Getenv("DB_PATH"),
-		FilesBackendDir:  os.Getenv("FILES_BACKEND_DIR"),
-		GammuImportDir:   os.Getenv("GAMMU_IMPORT_DIR"),
+		GammuRoot:        os.Getenv("GAMMU_ROOT"),
+		GammuInbox:       envDefault("GAMMU_INBOX", "inbox"),
+		GammuOutbox:      envDefault("GAMMU_OUTBOX", "outbox"),
+		GammuSent:        envDefault("GAMMU_SENT", "sent"),
+		GammuError:       envDefault("GAMMU_ERROR", "error"),
+		GammuInboxFormat: envDefault("GAMMU_INBOX_FORMAT", "utf8"),
 		LogLevel:         envDefault("LOG_LEVEL", "info"),
 		LogFormat:        envDefault("LOG_FORMAT", "text"),
 		SelfNumber:       os.Getenv("SELF_NUMBER"),
@@ -101,10 +115,13 @@ func Load(path string) (*Config, error) {
 	if c.SMSRetention, err = envDuration("SMS_RETENTION", 0); err != nil {
 		return nil, err
 	}
-	if c.GammuImportInterval, err = envDuration("GAMMU_IMPORT_INTERVAL", 0); err != nil {
+	if c.TestSMSTimeout, err = envDuration("TEST_SMS_TIMEOUT", 30*time.Second); err != nil {
 		return nil, err
 	}
-	if c.TestSMSTimeout, err = envDuration("TEST_SMS_TIMEOUT", 30*time.Second); err != nil {
+	if c.GammuWatchInterval, err = envDuration("GAMMU_WATCH_INTERVAL", 5*time.Second); err != nil {
+		return nil, err
+	}
+	if c.GammuOutboxMaxAttempts, err = envInt("GAMMU_OUTBOX_MAX_ATTEMPTS", 5); err != nil {
 		return nil, err
 	}
 
@@ -152,7 +169,7 @@ func (c *Config) validate() error {
 		}
 		for _, r := range c.ModemPIN {
 			if r < '0' || r > '9' {
-				errs = append(errs, fmt.Errorf(
+				errs = append(errs, errors.New(
 					"MODEM_PIN должен содержать только цифры"))
 				break
 			}
@@ -177,7 +194,58 @@ func (c *Config) validate() error {
 		errs = append(errs, errors.New(
 			"TELEGRAM_BOT_TOKEN и TELEGRAM_CHAT_ID должны быть заданы вместе"))
 	}
+
+	// Gammu file backend.
+	if c.GammuRoot != "" {
+		switch strings.ToLower(c.GammuInboxFormat) {
+		case "standard", "unicode", "utf8", "detail":
+		default:
+			errs = append(errs, fmt.Errorf(
+				"GAMMU_INBOX_FORMAT должен быть standard|unicode|utf8|detail, получено %q",
+				c.GammuInboxFormat))
+		}
+		if c.GammuOutboxMaxAttempts < 1 {
+			errs = append(errs, fmt.Errorf(
+				"GAMMU_OUTBOX_MAX_ATTEMPTS должен быть >= 1, получено %d",
+				c.GammuOutboxMaxAttempts))
+		}
+		if c.GammuInbox == "" || c.GammuOutbox == "" ||
+			c.GammuSent == "" || c.GammuError == "" {
+			errs = append(errs, errors.New(
+				"при заданном GAMMU_ROOT все подкаталоги "+
+					"(GAMMU_INBOX, GAMMU_OUTBOX, GAMMU_SENT, GAMMU_ERROR) "+
+					"должны быть непустыми"))
+		}
+	}
+
 	return errors.Join(errs...)
+}
+
+// GammuEnabled сообщает, сконфигурирован ли Gammu file backend.
+func (c *Config) GammuEnabled() bool { return c.GammuRoot != "" }
+
+// GammuInboxPath возвращает абсолютный путь к inbox-директории.
+func (c *Config) GammuInboxPath() string { return c.gammuPath(c.GammuInbox) }
+
+// GammuOutboxPath возвращает абсолютный путь к outbox-директории.
+func (c *Config) GammuOutboxPath() string { return c.gammuPath(c.GammuOutbox) }
+
+// GammuSentPath возвращает абсолютный путь к sent-директории.
+func (c *Config) GammuSentPath() string { return c.gammuPath(c.GammuSent) }
+
+// GammuErrorPath возвращает абсолютный путь к error-директории.
+func (c *Config) GammuErrorPath() string { return c.gammuPath(c.GammuError) }
+
+// gammuPath склеивает GammuRoot с подкаталогом. Абсолютный
+// подкаталог возвращается как есть.
+func (c *Config) gammuPath(sub string) string {
+	if c.GammuRoot == "" || sub == "" {
+		return ""
+	}
+	if filepath.IsAbs(sub) {
+		return sub
+	}
+	return filepath.Join(c.GammuRoot, sub)
 }
 
 // ==================== env helpers ====================

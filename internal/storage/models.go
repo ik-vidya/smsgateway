@@ -16,6 +16,20 @@ const (
 	DirectionOut Direction = "out"
 )
 
+// Source — откуда пришло сообщение.
+//
+// Для direction=out: 'api' (создано через HTTP API),
+// 'gammu-outbox' (прочитано из файлового outbox Gammu).
+// Для direction=in: 'modem' (принято через URC +CMTI).
+// Пустая строка — запись, созданная до введения source.
+type Source string
+
+const (
+	SourceAPI         Source = "api"
+	SourceModem       Source = "modem"
+	SourceGammuOutbox Source = "gammu-outbox"
+)
+
 // Status — статус сообщения.
 //
 // Для direction=out:
@@ -56,6 +70,7 @@ type Message struct {
 	ID        int64
 	Direction Direction
 	Status    Status
+	Source    Source
 	Peer      string
 	Text      string
 	RawPDU    string
@@ -112,6 +127,7 @@ type PendingPart struct {
 type Filter struct {
 	Direction Direction  // пусто — все
 	Status    Status     // пусто — все
+	Source    Source     // пусто — все
 	Peer      string     // подстрока; пусто — все
 	Since     *time.Time // created_at >= since
 	Until     *time.Time // created_at < until
