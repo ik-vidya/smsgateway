@@ -18,6 +18,8 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -156,9 +158,9 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /setup/test", s.handleSetupTest)
 	mux.HandleFunc("GET /lang/{code}", s.handleLangSet)
 
-	staticHandler := http.StripPrefix("/static/",
+	staticFSHandler := http.StripPrefix("/static/",
 		http.FileServer(http.FS(staticFS)))
-	mux.Handle("GET /static/", staticHandler)
+	mux.Handle("GET /static/", withStaticContentType(staticFSHandler))
 
 	return withSecurityHeaders(withCSRF(mux))
 }
@@ -275,4 +277,65 @@ func fmtTime(t time.Time) string {
 		return "—"
 	}
 	return t.Local().Format("2006-01-02 15:04:05")
+}
+
+// withStaticContentType задаёт Content-Type по расширению до
+// вызова next.
+//
+// Зачем: http.FileServer полагается на mime.TypeByExtension,
+// а тот на сервере без /etc/mime.types (или с минимальным
+// набором) может вернуть пусто. Тогда FileServer читает
+// первые 512 байт и вызывает http.DetectContentType — для
+// .css и .js это даёт "text/plain". С X-Content-Type-Options:
+// nosniff браузер такой ресурс блокирует:
+//
+//	Ресурс "…/bootstrap.min.css" был заблокирован из-за
+//	несоответствия MIME-типа ("text/plain")
+//	(X-Content-Type-Options: nosniff)
+//
+// withStaticContentType ставит Content-Type явно, до вызова
+// FileServer. FileServer видит, что заголовок уже есть, и не
+// перезаписывает.
+//
+// Путь в r.URL.Path — ещё с префиксом /static/ (обёртка стоит
+// до StripPrefix), поэтому filepath.Ext работает как обычно.
+func withStaticContentType(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ext := strings.ToLower(filepath.Ext(r.URL.Path))
+		var ct string
+		switch ext {
+		case ".css":
+			ct = "text/css; charset=utf-8"
+		case ".js", ".mjs":
+			ct = "application/javascript; charset=utf-8"
+		case ".html", ".htm":
+			ct = "text/html; charset=utf-8"
+		case ".json":
+			ct = "application/json; charset=utf-8"
+		case ".svg":
+			ct = "image/svg+xml"
+		case ".png":
+			ct = "image/png"
+		case ".jpg", ".jpeg":
+			ct = "image/jpeg"
+		case ".gif":
+			ct = "image/gif"
+		case ".ico":
+			ct = "image/x-icon"
+		case ".woff":
+			ct = "font/woff"
+		case ".woff2":
+			ct = "font/woff2"
+		case ".ttf":
+			ct = "font/ttf"
+		case ".txt":
+			ct = "text/plain; charset=utf-8"
+		case ".map":
+			ct = "application/json; charset=utf-8"
+		}
+		if ct != "" {
+			w.Header().Set("Content-Type", ct)
+		}
+		next.ServeHTTP(w, r)
+	})
 }

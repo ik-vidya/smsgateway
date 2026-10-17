@@ -1,10 +1,14 @@
 package gammu
 
 import (
+	"encoding/binary"
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf16"
 )
+
+// ==================== фикстуры ====================
 
 const sampleTextDecoded = `SMSC = "+3725509911"
 Number = "+37121234567"
@@ -28,6 +32,8 @@ Number = "+37121234567"
 Text = "Hello world"
 Received = "2026-10-15 12:00:34"
 `
+
+// ==================== базовые тесты ====================
 
 func TestParseFileTextDecoded(t *testing.T) {
 	m, err := ParseFile(sampleTextDecoded)
@@ -68,7 +74,7 @@ func TestParseFileHexPDU(t *testing.T) {
 	}
 }
 
-func TestParseFilePlainText(t *testing.T) {
+func TestParseFilePlainKV(t *testing.T) {
 	m, err := ParseFile(samplePlainText)
 	if err != nil {
 		t.Fatalf("ParseFile: %v", err)
@@ -120,9 +126,9 @@ func TestLooksLikeHexPDU(t *testing.T) {
 		samplePDUDeliver: true,
 		"00AA":           true,
 		"00aa":           true,
-		"hello":          false, // содержит 'h','l','o'
-		"00A":            false, // нечётная длина
-		"00AG":           false, // содержит 'G'
+		"hello":          false,
+		"00A":            false,
+		"00AG":           false,
 		"":               false,
 	}
 	for in, want := range cases {
@@ -133,8 +139,7 @@ func TestLooksLikeHexPDU(t *testing.T) {
 }
 
 func TestEffectiveTextHexFallbackToPlain(t *testing.T) {
-	// Text похож на hex, но PDU невалидный — должен уйти в plain,
-	// не упасть.
+	// Text похож на hex, но PDU невалидный — должен уйти в plain.
 	m := &Message{Text: strings.Repeat("AB", 20)}
 	text, src := m.EffectiveText()
 	if src != "plain" {
@@ -161,5 +166,193 @@ func TestParseTimestampLayouts(t *testing.T) {
 	}
 	if !parseTimestamp("garbage").IsZero() {
 		t.Error("мусор должен давать zero time")
+	}
+}
+
+// ==================== plain text fallback ====================
+
+const plainRuText = "Тест с rsmodule-tallin1 (tallin1 +37255691999): 2026-10-17 23:41:25"
+
+func TestParseFilePlaintextUTF8NoBOM(t *testing.T) {
+	m, err := ParseFile(plainRuText)
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+	if len(m.Fields) != 0 {
+		t.Errorf("Fields=%v, ожидалось пусто (plain text)", m.Fields)
+	}
+	text, src := m.EffectiveText()
+	if text != plainRuText {
+		t.Errorf("EffectiveText=%q, ожидалось %q", text, plainRuText)
+	}
+	if src != "plain" {
+		t.Errorf("source=%q, ожидалось plain", src)
+	}
+}
+
+func TestParseFilePlaintextMultiline(t *testing.T) {
+	src := "line1\nline2\nline3"
+	m, err := ParseFile(src)
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+	text, _ := m.EffectiveText()
+	if text != src {
+		t.Errorf("EffectiveText=%q, ожидалось %q", text, src)
+	}
+}
+
+func TestParseFilePlaintextWithEquals(t *testing.T) {
+	// plain-текст содержит «=», но ни один ключ до «=» не
+	// является известным gammu-полем — fallback должен сработать.
+	src := "Body = some text\nSecond line"
+	m, err := ParseFile(src)
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+	text, source := m.EffectiveText()
+	if text != src {
+		t.Errorf("EffectiveText=%q, ожидалось %q", text, src)
+	}
+	if source != "plain" {
+		t.Errorf("source=%q, ожидалось plain", source)
+	}
+}
+
+func TestParseFileKeyValueStillWins(t *testing.T) {
+	// Если в файле есть известный gammu-ключ, fallback не
+	// срабатывает.
+	src := "Number = \"+371\"\nTextDecoded = \"hi\"\n"
+	m, err := ParseFile(src)
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+	if m.Number != "+371" {
+		t.Errorf("Number=%q", m.Number)
+	}
+	text, source := m.EffectiveText()
+	if text != "hi" {
+		t.Errorf("EffectiveText=%q, ожидалось hi", text)
+	}
+	if source != "text_decoded" {
+		t.Errorf("source=%q, ожидалось text_decoded", source)
+	}
+}
+
+func TestParseFileKnownKeyOnly(t *testing.T) {
+	// Один известный ключ (SMSC) без текста — fallback НЕ
+	// срабатывает: это gammu-формат с пустым текстом.
+	src := `SMSC = "+3725509911"`
+	m, err := ParseFile(src)
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+	if m.SMSC != "+3725509911" {
+		t.Errorf("SMSC=%q", m.SMSC)
+	}
+	text, _ := m.EffectiveText()
+	if text != "" {
+		t.Errorf("EffectiveText=%q, ожидалось пусто", text)
+	}
+}
+
+// ==================== полный путь: байты → DecodeText → ParseFile ====================
+//
+// Реальный путь в Manager: os.ReadFile → DecodeText → ParseFile.
+// Тестируем end-to-end для разных кодировок plain-файла.
+
+func encodeUTF16(s string, order binary.ByteOrder, bom bool) []byte {
+	u16 := utf16.Encode([]rune(s))
+	out := make([]byte, 0, len(u16)*2+2)
+	if bom {
+		if order == binary.LittleEndian {
+			out = append(out, 0xFF, 0xFE)
+		} else {
+			out = append(out, 0xFE, 0xFF)
+		}
+	}
+	buf := make([]byte, 2)
+	for _, v := range u16 {
+		order.PutUint16(buf, v)
+		out = append(out, buf...)
+	}
+	return out
+}
+
+func TestParseFileFullPathUTF8NoBOM(t *testing.T) {
+	raw := []byte(plainRuText)
+	content, err := DecodeText(raw)
+	if err != nil {
+		t.Fatalf("DecodeText: %v", err)
+	}
+	m, err := ParseFile(content)
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+	text, src := m.EffectiveText()
+	if text != plainRuText {
+		t.Errorf("EffectiveText=%q, ожидалось %q", text, plainRuText)
+	}
+	if src != "plain" {
+		t.Errorf("source=%q, ожидалось plain", src)
+	}
+}
+
+func TestParseFileFullPathUTF8WithBOM(t *testing.T) {
+	raw := append([]byte{0xEF, 0xBB, 0xBF}, []byte(plainRuText)...)
+	content, err := DecodeText(raw)
+	if err != nil {
+		t.Fatalf("DecodeText: %v", err)
+	}
+	m, err := ParseFile(content)
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+	text, src := m.EffectiveText()
+	if text != plainRuText {
+		t.Errorf("EffectiveText=%q, ожидалось %q", text, plainRuText)
+	}
+	if src != "plain" {
+		t.Errorf("source=%q, ожидалось plain", src)
+	}
+}
+
+func TestParseFileFullPathUTF16LEWithBOM(t *testing.T) {
+	// Точная симуляция реального файла от rssmspool:
+	// ff fe 22 04 35 04 41 04 42 04 ...
+	raw := encodeUTF16(plainRuText, binary.LittleEndian, true)
+	content, err := DecodeText(raw)
+	if err != nil {
+		t.Fatalf("DecodeText: %v", err)
+	}
+	m, err := ParseFile(content)
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+	text, src := m.EffectiveText()
+	if text != plainRuText {
+		t.Errorf("EffectiveText=%q, ожидалось %q", text, plainRuText)
+	}
+	if src != "plain" {
+		t.Errorf("source=%q, ожидалось plain", src)
+	}
+}
+
+func TestParseFileFullPathUTF16BEWithBOM(t *testing.T) {
+	raw := encodeUTF16(plainRuText, binary.BigEndian, true)
+	content, err := DecodeText(raw)
+	if err != nil {
+		t.Fatalf("DecodeText: %v", err)
+	}
+	m, err := ParseFile(content)
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+	text, src := m.EffectiveText()
+	if text != plainRuText {
+		t.Errorf("EffectiveText=%q, ожидалось %q", text, plainRuText)
+	}
+	if src != "plain" {
+		t.Errorf("source=%q, ожидалось plain", src)
 	}
 }

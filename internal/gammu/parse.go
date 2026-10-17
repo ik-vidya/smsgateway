@@ -1,4 +1,15 @@
 // Package gammu, файл parse.go — разбор содержимого Gammu-файла.
+//
+// Поддерживается два формата:
+//
+//  1. Классический gammu: построчный "Key = Value" (SMSC, Number,
+//     Text, TextDecoded, Coding, UDH, Class, Sent, Received).
+//  2. Plain text: тело SMS как есть, без структуры (используется
+//     rssmspool и очень старыми gammu-smsd с TransmitFormat=text).
+//
+// Формат определяется автоматически по содержимому (см.
+// looksLikeGammu). Кодировка снимается раньше, в DecodeText:
+// ParseFile получает уже нормализованную UTF-8 строку.
 package gammu
 
 import (
@@ -27,11 +38,25 @@ type Message struct {
 	Fields map[string]string
 }
 
+// knownGammuKeys — список известных ключей gammu-формата.
+//
+// Если в файле нет ни одного из них — это plain text
+// (см. looksLikeGammu). «Посторонние» Key = Value (например,
+// «Body = text» в plain-сообщении) не считаются признаком
+// gammu-формата.
+var knownGammuKeys = []string{
+	"SMSC", "Number", "Text", "TextDecoded",
+	"Coding", "UDH", "Class", "Sent", "Received",
+}
+
 // ParseFile разбирает содержимое файла.
 //
-// Формат — построчный "Key = Value". Кавычки вокруг значений
-// опциональны. Пустые строки, комментарии (#) и секции ([...])
-// игнорируются.
+// Формат "Key = Value": кавычки вокруг значений опциональны,
+// пустые строки, комментарии (#) и секции ([...]) игнорируются.
+//
+// Fallback: если ни одного известного gammu-ключа не найдено,
+// всё содержимое считается телом SMS (m.Text). Адресат в этом
+// случае берётся из имени файла (Manager.processFile).
 func ParseFile(content string) (*Message, error) {
 	m := &Message{Fields: make(map[string]string)}
 
@@ -71,7 +96,34 @@ func ParseFile(content string) (*Message, error) {
 	m.Sent = parseTimestamp(m.Fields["Sent"])
 	m.Received = parseTimestamp(m.Fields["Received"])
 
+	// Fallback на plain text: если в файле нет ни одного
+	// известного gammu-ключа — всё содержимое это текст SMS.
+	//
+	// Проверяем известные ключи (а не просто наличие «=»):
+	// plain-текст может содержать «=» (например, «Body = text»),
+	// и тогда fallback не должен ломаться.
+	//
+	// Кодировка здесь уже UTF-8 (DecodeText вызван до ParseFile),
+	// поэтому fallback одинаково работает для UTF-8, UTF-16LE/BE
+	// с BOM и UTF-16LE без BOM.
+	if !m.looksLikeGammu() {
+		if trimmed := strings.TrimSpace(content); trimmed != "" {
+			m.Text = trimmed
+		}
+	}
+
 	return m, nil
+}
+
+// looksLikeGammu проверяет, есть ли в файле хотя бы один
+// известный gammu-ключ.
+func (m *Message) looksLikeGammu() bool {
+	for _, key := range knownGammuKeys {
+		if _, ok := m.Fields[key]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 // unquote снимает обрамляющие кавычки, если они есть.
@@ -107,8 +159,11 @@ func parseTimestamp(s string) time.Time {
 //
 // Второе значение — "text_decoded" | "pdu" | "plain". Никогда
 // не возвращает ошибку: если hex-подобный Text не декодируется
-// как PDU, он трактуется как обычный текст. Gammu-файлы приходят
-// из внешнего мира, падать на них нельзя.
+// как PDU, он трактуется как обычный текст.
+//
+// В plain-режиме (файл без Key = Value) ParseFile записывает
+// всё содержимое в m.Text, и EffectiveText вернёт его как
+// "plain". Адресат в этом случае берётся из имени файла.
 func (m *Message) EffectiveText() (text, source string) {
 	if m.TextDecoded != "" {
 		return m.TextDecoded, "text_decoded"
@@ -123,12 +178,6 @@ func (m *Message) EffectiveText() (text, source string) {
 
 // looksLikeHexPDU: непустая строка чётной длины, состоящая
 // только из hex-символов (0-9, A-F, a-f).
-//
-// Порога по длине нет намеренно: короткие hex-строки типа "00AA"
-// должны распознаваться как потенциальные PDU. Если pdu.Decode
-// на них упадёт (а он упадёт — это не валидный PDU), вызывающий
-// EffectiveText уйдёт в fallback "plain". Строки типа "hello"
-// отсекаются тем, что содержат не-hex символы.
 func looksLikeHexPDU(s string) bool {
 	if len(s) == 0 || len(s)%2 != 0 {
 		return false
@@ -144,8 +193,6 @@ func looksLikeHexPDU(s string) bool {
 }
 
 // decodePDUSafe вызывает pdu.Decode с защитой от паники.
-// Сторонний декодер может паниковать на мусоре — импорт файлов
-// не должен из-за этого ронять сервис.
 func decodePDUSafe(hex string) (text string, ok bool) {
 	defer func() {
 		if recover() != nil {

@@ -451,8 +451,16 @@ func TestSendNowPriorityZGoesToError(t *testing.T) {
 func TestSendNowInvalidName(t *testing.T) {
 	h := newManagerHarness(t, ManagerConfig{})
 
-	// Имя начинается с OUT, но не парсится.
-	h.writeOutbox(t, "OUTbadname.txt", "garbage")
+	// "OUT.txt" — префикс OUT, ext=txt (проходит whitelist),
+	// но тело имени пустое: ParseOutgoingFileName вернёт ошибку
+	// ("пустой recipient"). Это настоящее невалидное имя.
+	//
+	// Раньше тест использовал "OUTbadname.txt" — но это
+	// валидное имя (recipient="badname", priority="A"),
+	// а невалидность обеспечивалась содержимым "garbage"
+	// (ParseFile давал пустой текст). После plain-text
+	// fallback "garbage" стал валидным текстом, и тест упал.
+	h.writeOutbox(t, "OUT.txt", "garbage")
 
 	st, err := h.mgr.SendNow(context.Background())
 	if err != nil {
@@ -464,7 +472,7 @@ func TestSendNowInvalidName(t *testing.T) {
 	if h.sender.CallCount() != 0 {
 		t.Error("sender вызван при невалидном имени")
 	}
-	if !h.fileExists(h.errorDir, "OUTbadname.txt") {
+	if !h.fileExists(h.errorDir, "OUT.txt") {
 		t.Error("файл не в error")
 	}
 }

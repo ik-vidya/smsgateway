@@ -19,6 +19,17 @@ CSP: `default-src 'self'` (никаких CDN). CSRF: `SameSite=Lax`
 на cookie + проверка `Origin`/`Referer` в middleware для
 не-GET запросов.
 
+**Content-Type для статики.** `http.FileServer` полагается
+на `mime.TypeByExtension`, а тот на сервере без
+`/etc/mime.types` может вернуть пусто. Тогда `FileServer`
+делает sniff первых 512 байт через `DetectContentType` —
+для CSS/JS это даёт `text/plain`, и браузер блокирует
+ресурс из-за `X-Content-Type-Options: nosniff`. Чтобы не
+зависеть от mime-базы хоста, `withStaticContentType`
+ставит `Content-Type` явно по расширению
+(`.css` → `text/css`, `.js` → `application/javascript`,
+и т.д.) **до** вызова `FileServer`.
+
 ## Авторизация
 
 **Пока не реализована** (`WEBUI_AUTH_MODE=none`). Страница `/setup`

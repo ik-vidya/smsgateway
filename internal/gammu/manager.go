@@ -379,6 +379,20 @@ func (m *Manager) processFile(ctx context.Context, name string) (fileResult, err
 	}
 
 	text, src := msg.EffectiveText()
+
+	// debug-логирование: что попало в поля и какой источник
+	// текста выбрал EffectiveText. При LOG_LEVEL=debug видно,
+	// почему файл ушёл в error («пустой текст») — например,
+	// не нашлось ни известных ключей, ни plain-текста.
+	m.logger.Debug("gammu: файл разобран",
+		"name", name,
+		"fields_count", len(msg.Fields),
+		"has_textdecoded", msg.TextDecoded != "",
+		"has_text", msg.Text != "",
+		"has_number", msg.Number != "",
+		"effective_len", len(text),
+		"effective_source", src,
+	)
 	if text == "" {
 		err := errors.New("пустой текст сообщения")
 		if mvErr := m.moveToError(full, name, err.Error()); mvErr != nil {
@@ -472,7 +486,36 @@ func (m *Manager) readOutboxFile(path string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("декодирование %q: %w", path, err)
 	}
+
+	// debug-логирование: при LOG_LEVEL=debug видно, что
+	// пришло с диска и что получилось после декодирования.
+	// Полезно для диагностики «файл в error»: сразу видна
+	// кодировка (по первым байтам) и длина.
+	m.logger.Debug("gammu: файл прочитан",
+		"path", path,
+		"raw_len", len(raw),
+		"raw_first_bytes", hexFirstN(raw, 8),
+		"decoded_len", len(content),
+		"decoded_first_chars", firstChars(content, 60),
+	)
 	return content, nil
+}
+
+// hexFirstN возвращает hex первых n байт.
+func hexFirstN(b []byte, n int) string {
+	if len(b) < n {
+		n = len(b)
+	}
+	return fmt.Sprintf("%x", b[:n])
+}
+
+// firstChars возвращает первые n рун строки (для debug-лога).
+func firstChars(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n]) + "…"
 }
 
 func (m *Manager) handleSuccess(ctx context.Context,
