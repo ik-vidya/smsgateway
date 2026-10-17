@@ -8,25 +8,29 @@ BUILD_TIME  ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 LDFLAGS     += -X main.version=$(VERSION) -X main.buildTime=$(BUILD_TIME)
 
 .PHONY: all build run test test-race vet fmt tidy lint clean dist \
-        fetch migrate diagnostics help
+        fetch ci migrate diagnostics help
 
 all: build
 
 # build: tidy, fmt, vet выполняются как пререквизиты.
-# tidy следит за go.mod/go.sum; fmt перезаписывает исходники;
-# vet ловит простые ошибки до компиляции.
 build: tidy fmt vet
 	@mkdir -p $(BIN_DIR)
 	CGO_ENABLED=0 go build $(GOFLAGS) -ldflags '$(LDFLAGS)' -o $(BIN_DIR)/$(BINARY) $(PKG)
 
 run: build
-	sudo ./$(BIN_DIR)/$(BINARY) --config .env
+	./$(BIN_DIR)/$(BINARY) -config .env
 
 test:
-	go test ./...
+	go test ./... -timeout 60s
 
 test-race:
-	go test -race ./...
+	go test -race -timeout 120s \
+		./internal/logging/... \
+		./internal/webui/... \
+		./internal/api/... \
+		./internal/modem/... \
+		./internal/service/... \
+		./internal/storage/...
 
 vet:
 	go vet ./...
@@ -40,6 +44,34 @@ tidy:
 lint: vet
 	@command -v golangci-lint >/dev/null 2>&1 && golangci-lint run ./... || \
 	    echo "golangci-lint not installed, skipping"
+
+# ci: полный прогон, как в GitHub Actions.
+ci: tidy fmt vet
+	@UNFORMATTED=$$(gofmt -l cmd/ internal/ || true); \
+	if [ -n "$$UNFORMATTED" ]; then \
+		echo "gofmt found unformatted files:"; echo "$$UNFORMATTED"; exit 1; \
+	fi
+	@$(MAKE) --no-print-directory vendor-check
+	go test ./... -timeout 60s
+	@$(MAKE) --no-print-directory test-race
+	CGO_ENABLED=0 go build ./...
+
+# vendor-check: убедиться, что вендорные ассеты на месте.
+# Если нет — вызвать make fetch.
+vendor-check:
+	@missing=0; \
+	for f in \
+		internal/webui/static/vendor/bootstrap/bootstrap.min.css \
+		internal/webui/static/vendor/bootstrap/bootstrap.bundle.min.js \
+		internal/webui/static/vendor/htmx/htmx.min.js; do \
+		if [ ! -s "$$f" ]; then \
+			echo "missing or empty: $$f"; missing=1; \
+		fi; \
+	done; \
+	if [ "$$missing" = "1" ]; then \
+		echo "Fetching vendor assets..."; \
+		$(MAKE) --no-print-directory fetch; \
+	fi
 
 # fetch: скачать вендорные Bootstrap 5.2.3 и htmx 4.0.0 в
 # internal/webui/static/vendor/. Требуется curl или wget.
@@ -73,4 +105,4 @@ dist: clean
 	CGO_ENABLED=0 GOOS=linux   GOARCH=arm   GOARM=7 go build $(GOFLAGS) -ldflags '$(LDFLAGS)' -o $(BIN_DIR)/$(BINARY)-linux-armv7 $(PKG)
 
 help:
-	@echo "Targets: build run test test-race vet fmt tidy lint fetch migrate diagnostics clean dist"
+	@echo "Targets: build run test test-race vet fmt tidy lint fetch ci migrate diagnostics clean dist"

@@ -48,6 +48,17 @@ cd smsgateway
 make build
 ```
 
+`make build` делает `tidy`, `fmt`, `vet` и собирает бинарник.
+Вендорные ассеты (Bootstrap и htmx) уже в репозитории
+(`internal/webui/static/vendor/`), но если их нет — `make fetch`
+скачает их (требуется `curl` или `wget`).
+
+Полный прогон как в CI:
+
+```bash
+make ci
+```
+
 Кросс-сборка:
 
 ```bash
