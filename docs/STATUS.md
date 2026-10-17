@@ -95,6 +95,9 @@ ru/lv/en (go-i18n/v2). Bootstrap 5.2 и htmx 4.0 хранятся локальн
 проверка Origin/Referer. Работает только при
 `WEBUI_AUTH_MODE=none`; OIDC — отдельный этап.
 
+Полное описание страниц, эндпоинтов, hot-reload через SIGHUP
+и ограничений — [WEBUI.md](WEBUI.md).
+
 Страницы:
 - `GET /` — dashboard: состояние модема, БД, uptime, счётчики;
 - `GET /inbox` — входящие с фильтрами (peer, status, since/until)
