@@ -7,13 +7,24 @@ HTTP/JSON REST API. Более полная альтернатива `gammu-smsd
 
 ## Текущее состояние
 
-Ранняя версия. Реализованы: конфигурация, логирование, SQLite-хранилище,
-HTTP API, сервисный слой, AT-транспорт с URC-каналом, работа с SMS
-(отправка/приём/удаление), профили модемов (generic, sim800).
+Готов к продакшену. Реализованы:
 
-Ещё **не** реализованы: web-UI, Gammu file backend, Telegram-алерты,
-multipart-отправка/склейка, автоматический разбор PDU delivery report,
-эндпоинты `/diagnostics` и `/test-sms`. Подробности —
+- **REST API** — отправка/приём SMS, статус, диагностика,
+  самопроверка (`/api/v1/*`);
+- **Web UI** — dashboard, inbox, outbox, compose, live-логи
+  (SSE), настройка модема с hot-reload через SIGHUP;
+- **Gammu file backend** — совместимость с `gammu-smsd`,
+  конвертер `gammu-smsdrc → .env`;
+- **Профили модемов** — `generic`, `sim800`, `quectel`,
+  `telit`, `huawei`; команда `probe` для генерации скелета
+  нового профиля;
+- **CLI** — `detect-modem`, `probe`, `gammu-outbox`,
+  `convert-gammu-config`, `migrate`, `list-ports`;
+- **Telegram-алерты** — критические ошибки, самопроверка.
+
+Единственное, чего нет — **OIDC-авторизации для Web UI**
+(`WEBUI_AUTH_MODE=none`); ответственность за доступ — на
+администраторе (firewall / reverse proxy). Подробности —
 [docs/STATUS.md](docs/STATUS.md).
 
 ## Возможности (реализовано)
@@ -326,9 +337,11 @@ go-smsd/
 
 - [docs/STATUS.md](docs/STATUS.md) — что реализовано, что нет.
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — архитектура.
-- [docs/API.md](docs/API.md) — детали HTTP API.
+- [docs/API.md](docs/API.md) — HTTP API.
+- [docs/DEPLOY.md](docs/DEPLOY.md) — развёртывание (systemd,
+  docker, Raspberry Pi, миграция с gammu-smsd).
 - [docs/MODEMS.md](docs/MODEMS.md) — профили модемов.
-- [docs/WEBUI.md](docs/WEBUI.md) — план веб-UI.
+- [docs/WEBUI.md](docs/WEBUI.md) — веб-UI.
 - [docs/GAMMU-FORMAT.md](docs/GAMMU-FORMAT.md) — формат Gammu.
 
 ## Разработка

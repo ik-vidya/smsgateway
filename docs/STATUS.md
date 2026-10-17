@@ -1,164 +1,208 @@
 # Статус проекта
 
-**Дата последнего обновления:** 2026-10-15.
+**Дата последнего обновления:** 2026-10-17.
 
----
+`smsgateway` — готовый к продакшену SMS-шлюз. Все заявленные
+компоненты реализованы и покрыты тестами. Открытым остаётся
+только OIDC-авторизация для Web UI (B4).
 
 ## Реализовано
 
 ### Конфигурация (`internal/config`)
 
-Загрузка `.env`, валидация, `ParseDuration` (`h/m/s/ms/d`, `1d12h`),
-MODEM_PIN (4-8 цифр), парная валидация TELEGRAM_BOT_TOKEN +
-TELEGRAM_CHAT_ID. Тесты: 1.
+Загрузка `.env`, валидация, `ParseDuration` (`h/m/s/ms/d`,
+`1d12h`). Парная валидация `TELEGRAM_BOT_TOKEN` +
+`TELEGRAM_CHAT_ID`. Валидация `MODEM_PIN` (4–8 цифр). In-place
+правка `.env` для `detect-modem --write-config` и
+`/setup/save` (`envwrite.go`) — сохраняет комментарии и
+порядок строк. Тестов: 20+.
 
 ### Логирование (`internal/logging`)
 
-`log/slog`, `text` и `json`, уровни `debug|info|warn|error`.
+`log/slog` с уровнями `debug|info|warn|error` и форматом
+`text|json`. Кольцевой буфер на 1000 записей + pub/sub для
+SSE-страницы `/logs`. `NewWithBuffer` дублирует записи в
+буфер. Тестов: 13.
 
 ### Хранилище (`internal/storage`)
 
-SQLite через `modernc.org/sqlite` (без CGO), миграции через
-`//go:embed`. Схема: `messages`, `delivery_reports`,
-`pending_references`, `pending_parts`, `pending_part_bodies`,
-`imported_files`, `schema_migrations`. Тесты: 9.
+SQLite через `modernc.org/sqlite` (pure Go, без CGO).
+Миграции через `//go:embed`. Схема: `messages`,
+`delivery_reports`, `pending_references`, `pending_parts`,
+`pending_part_bodies`, `imported_files`, `gammu_outbox`,
+`schema_migrations`. CRUD, `UpdateStatus` с проверкой
+переходов, DR, брони TP-MR, multipart-сборка, retention.
+Тестов: 14.
 
 ### Модем (`internal/modem`)
 
-AT-транспорт (reader-горутина, prompt `> `, URC), `Exec`/`ExecPrompt`,
-`URCs()`. URC: `+CMTI`, `+CDS`, `+CREG`, `+CGREG`, `+CUSD`, `+CBC`,
-`RING`, `NO CARRIER`, `RDY`. `Init` отправляет `AT+CREG=2` и
-`AT+CGREG=2` — включает live URC `+CREG`/`+CGREG` с lac/ci
-(ошибки игнорируются, если модем не поддерживает расширенный
-режим). `SendSMS` (PDU, UCS-2/GSM-7, multipart),
-`ReadSMS`, `DeleteSMS`, `DeleteAllSMS`. `OpenSerial`, `ListSerialPorts`.
-AlignReadStorage, retry при транзиентных ошибках, разблокировка
-SIM по PIN. Тесты: 38.
+AT-транспорт: reader-горутина с побайтовым чтением,
+распознавание prompt `> ` и URC, `Exec`/`ExecPrompt`,
+`URCs()`. `Init` отправляет `ATE0`, `AT+CMEE=2`,
+`AT+CREG=2`, `AT+CGREG=2` — последние два включают live
+URC `+CREG`/`+CGREG` с lac/ci (ошибки игнорируются, если
+модем не поддерживает).
+
+URC: `+CMTI`, `+CDS` (авторазбор PDU), `+CREG`, `+CGREG`,
+`+CUSD`, `+CBC`, `RING`, `NO CARRIER`, `RDY`.
+
+`SendSMS` (PDU, GSM-7/UCS-2, multipart), `ReadSMS`
+(PDU-декодер через `sim800ctl/pkg/pdu`), `DeleteSMS`,
+`DeleteAllSMS`. `OpenSerial`, `ListSerialPorts`,
+`AlignReadStorage`, retry при транзиентных ошибках,
+разблокировка SIM по PIN с маскированием в логах.
+
+`discover.go` — обнаружение портов и модемов через
+`/sys/class/tty/<name>/device/` и `/dev/serial/by-id`.
+Используется CLI `detect-modem` и Web UI `/setup`.
+
+Тестов: 50+.
 
 ### Профили (`internal/profiles`)
 
-`Profile` с Workarounds/PreInitHook/PreSendHook. `Generic`,
-`SIM800`, `Quectel`, `Telit`, `Huawei` (три последних —
-минимальные обёртки над Generic; специфических обходов пока нет).
-`Get()` case-insensitive, `Auto()` выбирает по Manufacturer/Model.
-Тесты: 5.
-
-### Сервис (`internal/service`)
-
-URC-цикл, отправка с retry, pending references, `HandleDeliveryReport`,
-`SendTestSMS`, `RunDiagnostics`. Принимает `Notifier` — критические
-ошибки уходят в Telegram. Фоновый опрос сети (`networkLoop`):
-`AT+CREG?` и `AT+CSQ` раз в 30 секунд, первый опрос — сразу
-после `Init`, чтобы dashboard показывал актуальное состояние
-(URC `+CREG` по умолчанию не приходит — нужен `AT+CREG=2`, его
-пока не шлём). `Registered()` возвращает `networkStat==1 || ==5`.
-Тесты: 20.
+`Profile` с `Workarounds`/`PreInitHook`/`PreSendHook`.
+Реализованы: `generic`, `sim800`, `quectel`, `telit`,
+`huawei`. `Get()` case-insensitive, `Auto()` выбирает по
+Manufacturer/Model. Тестов: 5.
 
 ### Диагностика (`internal/diagnostics`)
 
-`Collect(ctx, modem)` — опрос AT-команд, парсинг в структурированный
-`Result`. Тесты: 7.
+`Collect(ctx, modem)` — опрос ATI/CGMI/CGMM/CGMR/CGSN/CIMI/
+CCID/CPIN?/CSQ/CREG?/CGREG?/COPS?/CSCA?/CPMS?, парсинг в
+структурированный `Result`. Ошибка отдельной команды не
+прерывает сбор. Тестов: 7.
 
-### Notify (`internal/notify`)
+### Probe (`internal/probe`)
 
-- `Notifier` интерфейс, `Noop`.
-- `TelegramNotifier`: асинхронная очередь, дедупликация (окно
-  5 минут), rate limit (1 сообщение в секунду), форматирование
-  с эмодзи по уровню.
-- Тесты: 9 (mock HTTP-сервер).
+Опрос модема для отчёта и генерации скелета профиля.
+Опциональные команды: `AT+SPIC`, `AT+CBC`, `AT+CSMP?`,
+`AT+CNMI?`, `AT+CSCS?`, `AT+CFUN?`, `AT+CBAND?`.
+`Result.GenerateProfile` — Go-скелет с TODO.
+`Result.WriteProfile` — запись с защитой от перезаписи
+(маркер `// generated by smsgateway probe`, `--force`).
+Тестов: 14.
+
+### Сервис (`internal/service`)
+
+URC-цикл, отправка с retry (3 попытки, backoff 1s/5s,
+только транзиентные), pending references, `HandleDeliveryReport`,
+`SendTestSMS` (уведомляет Notifier), `RunDiagnostics`.
+`networkLoop` — опрос `AT+CREG?` и `AT+CSQ` раз в 30 секунд,
+первый опрос сразу после `Init`. `Registered()` —
+`networkStat == 1 || == 5`. `recoverGammuOrphans` при
+старте. `EnqueueOutgoing` — общий путь для API и Web UI.
+
+Адаптеры: `ModemSender` (`gammu.Sender` поверх
+`*modem.Modem`), `StorageOutboxStore` (`gammu.OutboxStore`
+поверх `*storage.Store`). Тестов: 40+.
 
 ### HTTP API (`internal/api`)
 
-`net/http` + `ServeMux`, graceful shutdown. Middleware: `withAuth`,
-`withLogging`, `withRecover` (паника → Telegram-алерт). Эндпоинты:
-`/healthz`, `/api/v1/status`, `/api/v1/messages` (CRUD),
-`/api/v1/test-sms`, `/api/v1/diagnostics`. Тесты: 21.
+`net/http` + `ServeMux` (Go 1.22 паттерны method+path),
+graceful shutdown. Middleware: `withAuth` (X-API-Key или
+Bearer, constant-time), `withLogging`, `withRecover`
+(паника → Telegram-алерт).
+
+Эндпоинты: `/healthz`, `/api/v1/status`,
+`/api/v1/messages` (CRUD), `/api/v1/test-sms`,
+`/api/v1/diagnostics` (`?raw=1` — сырые AT). Формат ошибок
+`{"error":{"code","message"}}`. Все сообщения через API
+получают `source='api'`. Тестов: 21.
+
+### Notify (`internal/notify`)
+
+`Notifier` (async, bounded queue 64, dedup 5 минут, rate
+limit 1 сообщение/сек). `TelegramNotifier` +
+`Noop`. Используется для критических ошибок старта, падений
+модема, паники в API, результата самопроверки. Тестов: 13.
 
 ### Gammu file backend (`internal/gammu`)
 
-Совместим с gammu-smsd Files backend. Каталоги inbox/outbox/sent/
-error под `GAMMU_ROOT`. Форматы имён IN и все три формы OUT с
-приоритетами A-Z. Автоопределение кодировки файла (UTF-8 default
-и fallback, UTF-16LE/BE с BOM). Watcher outbox с retry и
-понижением приоритета (`retries >= GAMMU_OUTBOX_MAX_ATTEMPTS`
-или приоритет Z → error). CLI: `gammu-outbox [--dry-run]`.
-Подробности — [GAMMU-FORMAT.md](GAMMU-FORMAT.md).
+Совместим с `gammu-smsd` Files backend:
+- inbox/outbox/sent/error под `GAMMU_ROOT`;
+- форматы IN и все три формы OUT с приоритетами A-Z;
+- автоопределение кодировки (UTF-8 default/fallback,
+  UTF-16LE/BE с BOM);
+- watcher outbox с retry и понижением приоритета
+  (`retries >= GAMMU_OUTBOX_MAX_ATTEMPTS` или приоритет Z
+  → error);
+- конвертер `gammu-smsdrc → .env` с отчётом об игнорированном
+  (`MaxRetries` = N+1 → `GAMMU_OUTBOX_MAX_ATTEMPTS`).
+
+Тестов: 55+.
+
+### Web UI (`internal/webui`)
+
+`net/http` + `html/template` (embed), Bootstrap 5.2 и
+htmx 4.0 локально в `static/vendor/` (через `make fetch`).
+CSP — `default-src 'self'` без CDN. CSRF — SameSite=Lax на
+cookie + проверка Origin/Referer для не-GET. Локализация:
+go-i18n/v2 (ru/lv/en). Определение языка: `?lang` → cookie →
+`Accept-Language` → default.
+
+Страницы:
+- `GET /` — dashboard (модем: «порт открыт» ≠ «в сети»,
+  БД, uptime, счётчики);
+- `GET /inbox`, `GET /outbox` — списки с фильтрами (peer,
+  status, since/until) и пагинацией; htmx-фрагменты через
+  `HX-Request`;
+- `GET /compose`, `POST /compose` — отправка;
+- `GET /logs`, `GET /logs/stream` — SSE live-поток логов;
+- `GET /setup` — настройка модема: watcher портов (SSE),
+  probe (AT+CGMI/CGMM/CGMR/CGSN), save (SIGHUP hot-reload),
+  самопроверка (`SendTestSMS`);
+- `GET /lang/{code}` — переключение языка.
+
+Hot-reload: `POST /setup/save` пишет `SERIAL_PORT` в `.env` и
+шлёт SIGHUP. `main.go` ловит SIGHUP, делает graceful
+shutdown, `cleanup()` через `sync.Once`, `syscall.Exec` —
+PID сохраняется, systemd не замечает рестарт.
+
+Авторизация — только `WEBUI_AUTH_MODE=none`. OIDC — в планах
+(B4).
 
 ### CLI (`cmd/smsgateway`)
 
-Команды: `version`, `migrate`, `list-ports`, `detect-modem`, `probe`
-(`--write-config` правит `.env` in-place), `gammu-outbox`,
-`convert-gammu-config`, сервис. Режим без модема
-(`SERIAL_PORT=none`). Telegram-нотификатор создаётся
-в `main` и передаётся в `service` и `api`.
+cobra. Подкоманды: `version`, `migrate`, `list-ports`,
+`detect-modem` (`--write-config`, `--json`, `--skip-at`),
+`probe` (`--json`, `--output`, `--name`, `--force`,
+`--scan-networks`, `--cops-timeout`), `gammu-outbox`
+(`--dry-run`), `convert-gammu-config` (`--from`, `--to`,
+`--verbose`), запуск сервиса.
 
----
+### CI
 
-## В процессе / частично
+`.github/workflows/ci.yml`: `gofmt -l`, `go vet`, `go test`
+(60s timeout), `go test -race` для пакетов с параллельностью
+(logging, webui, api, modem, service, storage), vendor check
+(при отсутствии — `make fetch`), cross-compile (linux/amd64,
+linux/arm64, linux/armv7, windows/amd64).
 
-### (удалено — Gammu реализован, см. «Реализовано»)
+`make ci` — локальный прогон того же набора.
 
-### Web UI
+## Не реализовано
 
-Сервер на `net/http` + `html/template` (embed). Локализация
-ru/lv/en (go-i18n/v2). Bootstrap 5.2 и htmx 4.0 хранятся локально
-в `static/vendor` (скачиваются через `make fetch`), CSP —
-`default-src 'self'` без CDN. CSRF: SameSite=Lax на cookie +
-проверка Origin/Referer. Работает только при
-`WEBUI_AUTH_MODE=none`; OIDC — отдельный этап.
+### OIDC-авторизация для Web UI (B4)
 
-Полное описание страниц, эндпоинтов, hot-reload через SIGHUP
-и ограничений — [WEBUI.md](WEBUI.md).
-
-Страницы:
-- `GET /` — dashboard: состояние модема, БД, uptime, счётчики;
-- `GET /inbox` — входящие с фильтрами (peer, status, since/until)
-  и пагинацией; htmx-фрагмент `messages-table` через
-  `HX-Request`;
-- `GET /outbox` — исходящие, те же фильтры и пагинация;
-- `GET /compose`, `POST /compose` — отправка;
-- `GET /logs` — live-поток логов (SSE);
-- `GET /logs/stream` — SSE-эндпоинт (JSON, keepalive 15s);
-- `GET /lang/{code}` — переключение языка.
-
-### Самопроверка (B5c)
-
-`POST /setup/test` вызывает `Service.SendTestSMS` (синхронно,
-ждёт терминального статуса или `TEST_SMS_TIMEOUT`).
-`SendTestSMS` уведомляет `Notifier`:
-  - delivered → Warning (`selftest OK`);
-  - failed → Critical (`selftest FAILED`);
-  - timeout → Warning (`timeout waiting for DR`);
-  - прочие → Warning (`status=...`).
-Страница `/setup` показывает кнопку «Отправить тестовую SMS»
-при настроенном `SERIAL_PORT`; результат — в браузере и
-(если Telegram включён) в боте.
-
-### Логи через SSE
-
-`internal/logging` содержит ring buffer на 1000 записей +
-pub/sub. `NewWithBuffer` создаёт `slog.Handler`, который пишет
-и в stdout, и в буфер. Страница `/logs` подключается к
-`/logs/stream` через `EventSource`, рисует записи в DOM
-(лимит 2000), фильтрует по уровню, умеет ставиться на паузу
-и чиститься. Автопрокрутка вниз отключается, если пользователь
-прокрутил вверх. При переполнении канала подписчика шлём
-`event: warning` с числом пропущенных записей.
-
-### Мультимодемность
-
-Профили `sim800`, `generic`. `quectel`, `telit` — в конфиге, но
-кода нет.
-
----
-
-## Другие запланированные задачи
-
-1. OIDC-авторизация для Web UI (B4).
-2. Отладка с реальным SIM800L: питание, прошивка, `sim800ctl`-фиксы
-   (таймаут `AT+COPS=?` = 180с, UART-чтение).
+Отложено до готовности OIDC-библиотеки пользователя.
+`WEBUI_AUTH_MODE=none` — единственный режим. Ответственность
+за сетевой доступ — на администраторе (firewall / reverse
+proxy с basic auth).
 
 ## Известные ограничения
 
-- Один процесс = один модем.
-- Не тестировано на живом SIM800L в составе `smsgateway`.
+- **Один процесс = один модем.** Мультимодемность — через
+  systemd unit-шаблоны с разными `.env` (см.
+  `docs/DEPLOY.md`).
+- **Flash SMS** (флаг `f` в расширении OUT-файла Gammu) не
+  поддерживается на уровне `pdu.Build` в `sim800ctl` —
+  отправляется как обычное SMS, в лог пишется warning.
+- **Не тестировано на живом SIM800L в составе
+  `smsgateway`** — весь код проверен на mock-модемах; в
+  реальной работе проверялись только AT-транспорт и
+  диагностика через `sim800ctl`. Причина — нестабильность
+  SIM800L при питании от USB-порта без конденсатора (см.
+  `sim800ctl/docs/SIM800L-NOTES.md`, раздел 16).
+- **Web UI: `WriteTimeout=0`** — SSE-стримы живут дольше
+  обычных запросов. ReadHeaderTimeout и ReadTimeout
+  остаются. Для доверенной сети — приемлемо.
