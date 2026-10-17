@@ -84,6 +84,18 @@ func (m *Modem) Init(ctx context.Context) error {
 	_, _ = m.transport.Exec(ctx, "ATE0")
 	_, _ = m.transport.Exec(ctx, "AT+CMEE=2")
 
+	// 2a. Расширенные URC регистрации. AT+CREG=2 включает live
+	// URC +CREG с lac/ci (вместо голого stat), AT+CGREG=2 — для
+	// GPRS-регистрации. service.networkLoop опрашивает эти же
+	// команды периодически как fallback (раз в 30 секунд), но
+	// при работающих URC dashboard обновляется мгновенно: в
+	// handleURC уже есть обработка modem.URCCREG.
+	//
+	// Некоторые модемы не поддерживают расширенный режим —
+	// ошибки игнорируются, чтобы не блокировать инициализацию.
+	_, _ = m.transport.Exec(ctx, "AT+CREG=2")
+	_, _ = m.transport.Exec(ctx, "AT+CGREG=2")
+
 	// 3. Идентификация.
 	info := Info{}
 	if resp, err := m.transport.Exec(ctx, "AT+CGMI"); err == nil {

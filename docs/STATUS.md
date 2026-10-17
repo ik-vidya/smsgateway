@@ -27,7 +27,10 @@ SQLite через `modernc.org/sqlite` (без CGO), миграции через
 
 AT-транспорт (reader-горутина, prompt `> `, URC), `Exec`/`ExecPrompt`,
 `URCs()`. URC: `+CMTI`, `+CDS`, `+CREG`, `+CGREG`, `+CUSD`, `+CBC`,
-`RING`, `NO CARRIER`, `RDY`. `SendSMS` (PDU, UCS-2/GSM-7, multipart),
+`RING`, `NO CARRIER`, `RDY`. `Init` отправляет `AT+CREG=2` и
+`AT+CGREG=2` — включает live URC `+CREG`/`+CGREG` с lac/ci
+(ошибки игнорируются, если модем не поддерживает расширенный
+режим). `SendSMS` (PDU, UCS-2/GSM-7, multipart),
 `ReadSMS`, `DeleteSMS`, `DeleteAllSMS`. `OpenSerial`, `ListSerialPorts`.
 AlignReadStorage, retry при транзиентных ошибках, разблокировка
 SIM по PIN. Тесты: 38.

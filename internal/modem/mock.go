@@ -120,13 +120,32 @@ func (m *MockTransport) Write(p []byte) (int, error) {
 			}
 		}
 	}
-	// 3. Fallback для AT+CPIN?.
-	if !foundOK && cmd == "AT+CPIN?" {
-		found = mockResponse{
-			matchCmd: "AT+CPIN?",
-			lines:    []string{"+CPIN: READY", "OK"},
+	// 3. Fallback для необязательных команд инициализации.
+	//
+	// AT+CPIN? — часто нужен тестам, которые не занимаются
+	// PIN-логикой (Init всегда вызывает unlockSIM, а тот —
+	// AT+CPIN?).
+	//
+	// AT+CREG=2 / AT+CGREG=2 — Init отправляет их всем модемам
+	// для включения расширенных URC регистрации. На реальном
+	// модеме ответ — OK или ERROR (если команда не
+	// поддерживается); Init игнорирует обе ветки. В mock-е по
+	// умолчанию OK, чтобы не обновлять script в каждом тесте.
+	if !foundOK {
+		switch cmd {
+		case "AT+CPIN?":
+			found = mockResponse{
+				matchCmd: cmd,
+				lines:    []string{"+CPIN: READY", "OK"},
+			}
+			foundOK = true
+		case "AT+CREG=2", "AT+CGREG=2":
+			found = mockResponse{
+				matchCmd: cmd,
+				lines:    []string{"OK"},
+			}
+			foundOK = true
 		}
-		foundOK = true
 	}
 	m.mu.Unlock()
 

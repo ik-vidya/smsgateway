@@ -186,3 +186,26 @@ func TestModemInfoConcurrent(t *testing.T) {
 	}
 	<-done
 }
+
+func TestModemInitSendsRegistrationURC(t *testing.T) {
+	// Init должен отправлять AT+CREG=2 и AT+CGREG=2 — это
+	// включает live URC +CREG с lac/ci. service.networkLoop
+	// опрашивает эти же команды периодически, но при работающих
+	// URC dashboard обновляется мгновенно.
+	m, mock := newTestModem(t, profiles.Generic{})
+
+	if err := m.Init(context.Background()); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	written := string(mock.WrittenBytes())
+	for _, want := range []string{
+		"AT+CREG=2\r",
+		"AT+CGREG=2\r",
+	} {
+		if !strings.Contains(written, want) {
+			t.Errorf("не отправлено: %q\nполучено:\n%s",
+				want, written)
+		}
+	}
+}
