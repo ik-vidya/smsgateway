@@ -87,6 +87,7 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 	msg := &storage.Message{
 		Direction: storage.DirectionOut,
 		Status:    storage.StatusQueued,
+		Source:    storage.SourceAPI,
 		Peer:      strings.TrimSpace(req.To),
 		Text:      req.Text,
 	}
