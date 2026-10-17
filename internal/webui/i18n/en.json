@@ -95,5 +95,14 @@
   "setup.saving": "Saving…",
   "setup.saved": "Saved. Service is restarting…",
   "setup.saving_hint": "Page will reload automatically in a few seconds.",
-  "setup.save_failed": "Save failed"
+  "setup.save_failed": "Save failed",
+  "setup.test_title": "Self-test",
+  "setup.test_intro": "Send a test SMS to your own number and wait for the delivery report.",
+  "setup.test_self": "Recipient (SELF_NUMBER)",
+  "setup.test": "Send test SMS",
+  "setup.testing": "Sending…",
+  "setup.test_ok": "Test SMS delivered successfully.",
+  "setup.test_timeout": "Timed out waiting for the delivery report. The SMS may still arrive shortly.",
+  "setup.test_failed": "Test failed",
+  "setup.test_no_self": "SELF_NUMBER is not configured in .env. Set it to your own phone number to use the self-test."
 }

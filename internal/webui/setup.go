@@ -1,6 +1,6 @@
 // Package webui, файл setup.go — страница /setup, SSE-поток портов,
-// AT-проба выбранного порта и сохранение в .env с перезапуском
-// сервиса через SIGHUP.
+// AT-проба выбранного порта, сохранение в .env с перезапуском
+// сервиса через SIGHUP и самопроверка (отправка SMS самому себе).
 package webui
 
 import (
@@ -22,6 +22,7 @@ const (
 	setupProbeTimeout     = 15 * time.Second
 	setupCmdTimeout       = 3 * time.Second
 	setupReloadDelay      = 200 * time.Millisecond
+	setupTestTimeout      = 90 * time.Second
 )
 
 // handleSetup — GET /setup.
@@ -34,6 +35,7 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 	data := s.baseData(r, "setup")
 	data["CurrentPort"] = s.cfg.SerialPort
 	data["EnvPath"] = s.envPath
+	data["SelfNumber"] = s.cfg.SelfNumber
 	s.render(w, "setup", data)
 }
 
@@ -152,9 +154,7 @@ func (s *Server) handleSetupProbe(w http.ResponseWriter, r *http.Request) {
 // Принимает {"port": "..."}. Проверяет путь, пишет SERIAL_PORT в
 // .env (сохраняя комментарии и остальные переменные), возвращает
 // 200 и в фоне шлёт SIGHUP самому себе. main.go при получении
-// SIGHUP делает graceful shutdown и syscall.Exec("/proc/self/exe"),
-// благодаря чему новый процесс читает уже обновлённый .env.
-// PID сохраняется, systemd не замечает рестарт.
+// SIGHUP делает graceful shutdown и syscall.Exec("/proc/self/exe").
 func (s *Server) handleSetupSave(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Port string `json:"port"`
@@ -207,6 +207,58 @@ func (s *Server) handleSetupSave(w http.ResponseWriter, r *http.Request) {
 		"ok":      true,
 		"port":    req.Port,
 		"applied": applied,
+	})
+}
+
+// handleSetupTest — POST /setup/test.
+//
+// Вызывает svc.SendTestSMS (синхронно, ждёт терминального статуса
+// или таймаута). SendTestSMS сам уведомляет Notifier — при
+// настроенном Telegram результат придёт и в бот.
+func (s *Server) handleSetupTest(w http.ResponseWriter, r *http.Request) {
+	if s.svc == nil {
+		writeJSONSetup(w, http.StatusServiceUnavailable, map[string]any{
+			"error": "service not configured",
+		})
+		return
+	}
+	if s.cfg.SelfNumber == "" {
+		writeJSONSetup(w, http.StatusBadRequest, map[string]any{
+			"error":       "SELF_NUMBER is not set in .env",
+			"self_number": "",
+		})
+		return
+	}
+	if s.cfg.SerialPort == "" || s.cfg.SerialPort == "none" {
+		writeJSONSetup(w, http.StatusServiceUnavailable, map[string]any{
+			"error": "modem is not configured",
+		})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), setupTestTimeout)
+	defer cancel()
+
+	res, err := s.svc.SendTestSMS(ctx, "")
+	if err != nil {
+		s.logger.Warn("webui: selftest", "err", err)
+		writeJSONSetup(w, http.StatusInternalServerError, map[string]any{
+			"error": err.Error(),
+		})
+		return
+	}
+
+	s.logger.Info("webui: selftest завершён",
+		"id", res.ID, "status", res.Status,
+		"timed_out", res.TimedOut)
+
+	writeJSONSetup(w, http.StatusOK, map[string]any{
+		"id":          res.ID,
+		"status":      string(res.Status),
+		"timed_out":   res.TimedOut,
+		"error":       res.Error,
+		"reference":   res.Reference,
+		"self_number": s.cfg.SelfNumber,
 	})
 }
 

@@ -106,6 +106,19 @@ ru/lv/en (go-i18n/v2). Bootstrap 5.2 и htmx 4.0 хранятся локальн
 - `GET /logs/stream` — SSE-эндпоинт (JSON, keepalive 15s);
 - `GET /lang/{code}` — переключение языка.
 
+### Самопроверка (B5c)
+
+`POST /setup/test` вызывает `Service.SendTestSMS` (синхронно,
+ждёт терминального статуса или `TEST_SMS_TIMEOUT`).
+`SendTestSMS` уведомляет `Notifier`:
+  - delivered → Warning (`selftest OK`);
+  - failed → Critical (`selftest FAILED`);
+  - timeout → Warning (`timeout waiting for DR`);
+  - прочие → Warning (`status=...`).
+Страница `/setup` показывает кнопку «Отправить тестовую SMS»
+при настроенном `SERIAL_PORT`; результат — в браузере и
+(если Telegram включён) в боте.
+
 ### Логи через SSE
 
 `internal/logging` содержит ring buffer на 1000 записей +

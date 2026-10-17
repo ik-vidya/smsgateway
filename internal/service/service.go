@@ -309,7 +309,45 @@ func (s *Service) SendTestSMS(ctx context.Context, text string) (TestSMSResult, 
 	s.logger.Info("service: test-sms поставлен в очередь",
 		"id", id, "peer", s.selfNumber)
 
-	return s.waitForTerminal(ctx, id)
+	res, err := s.waitForTerminal(ctx, id)
+	if err != nil {
+		return res, err
+	}
+	s.notifyTestResult(ctx, res)
+	return res, nil
+}
+
+// notifyTestResult логирует результат самопроверки через Notifier.
+//
+// Используется SendTestSMS (и, через неё, POST /api/v1/test-sms и
+// POST /setup/test в Web UI): инженеру, настраивающему модем без
+// клавиатуры, важно видеть результат и в браузере, и в Telegram.
+// Успех — Warning (не ошибка, но требует внимания); провал —
+// Critical.
+func (s *Service) notifyTestResult(ctx context.Context, res TestSMSResult) {
+	if s.notifier == nil {
+		return
+	}
+	switch {
+	case res.TimedOut:
+		s.notifier.Notify(ctx, notify.LevelWarning, fmt.Errorf(
+			"selftest: timeout waiting for DR (status=%s, id=%d)",
+			res.Status, res.ID))
+	case res.Status == storage.StatusDelivered:
+		s.notifier.Notify(ctx, notify.LevelWarning, fmt.Errorf(
+			"selftest OK: delivered (id=%d, ref=%d)",
+			res.ID, res.Reference))
+	case res.Status == storage.StatusFailed:
+		msg := res.Error
+		if msg == "" {
+			msg = "unknown error"
+		}
+		s.notifier.Notify(ctx, notify.LevelCritical, fmt.Errorf(
+			"selftest FAILED: %s (id=%d)", msg, res.ID))
+	default:
+		s.notifier.Notify(ctx, notify.LevelWarning, fmt.Errorf(
+			"selftest: status=%s (id=%d)", res.Status, res.ID))
+	}
 }
 
 func (s *Service) waitForTerminal(ctx context.Context, id int64) (TestSMSResult, error) {

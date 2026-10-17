@@ -95,5 +95,14 @@
   "setup.saving": "Saglabā…",
   "setup.saved": "Saglabāts. Serviss pārstartējas…",
   "setup.saving_hint": "Pēc dažām sekundēm lapa atjaunosies automātiski.",
-  "setup.save_failed": "Neizdevās saglabāt"
+  "setup.save_failed": "Neizdevās saglabāt",
+  "setup.test_title": "Pašpārbaude",
+  "setup.test_intro": "Nosūtīt testa SMS uz savu numuru un nogaidīt piegādes statusu.",
+  "setup.test_self": "Saņēmējs (SELF_NUMBER)",
+  "setup.test": "Nosūtīt testa SMS",
+  "setup.testing": "Sūta…",
+  "setup.test_ok": "Testa SMS veiksmīgi piegādāta.",
+  "setup.test_timeout": "Beidzies piegādes statusa gaidīšanas laiks. SMS var pienākt nedaudz vēlāk.",
+  "setup.test_failed": "Tests neizdevās",
+  "setup.test_no_self": "SELF_NUMBER nav iestatīts .env failā. Iestatiet savu numuru, lai izmantotu pašpārbaudi."
 }

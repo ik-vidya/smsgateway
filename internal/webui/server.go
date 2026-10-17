@@ -153,6 +153,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /setup/ports/stream", s.handleSetupPortsStream)
 	mux.HandleFunc("POST /setup/probe", s.handleSetupProbe)
 	mux.HandleFunc("POST /setup/save", s.handleSetupSave)
+	mux.HandleFunc("POST /setup/test", s.handleSetupTest)
 	mux.HandleFunc("GET /lang/{code}", s.handleLangSet)
 
 	staticHandler := http.StripPrefix("/static/",

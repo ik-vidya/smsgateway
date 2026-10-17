@@ -1,12 +1,13 @@
 // smsgateway admin UI — клиентские хелперы.
 //
 // /logs — SSE-поток логов.
-// /setup — SSE-поток портов, probe и сохранение конфига.
+// /setup — SSE-поток портов, probe, save и самопроверка.
 (function () {
     'use strict';
 
     initLogs();
     initSetup();
+    initSetupTest();
 
     // ==================== /logs ====================
 
@@ -246,9 +247,11 @@
                 result.innerHTML = escapeHtml(labels.saved) + '<br>' +
                     '<small class="text-muted">' +
                     escapeHtml(labels.savingHint) + '</small>';
-                // Через 5 секунд перезагрузить главную.
+                // Через 5 секунд перезагрузить /setup — exec уже
+                // произошёл, страница отрендерится с новым
+                // CurrentPort и кнопкой «Тест».
                 setTimeout(function () {
-                    window.location.href = '/';
+                    window.location.href = '/setup';
                 }, 5000);
             }).catch(function (err) {
                 btn.disabled = false;
@@ -273,6 +276,89 @@
                 console.warn('setup: stream closed');
             }
         };
+    }
+
+    // ==================== /setup/test ====================
+
+    function initSetupTest() {
+        var card = document.getElementById('setup-test-card');
+        if (!card) return;
+
+        var btn = document.getElementById('setup-test-btn');
+        var result = document.getElementById('setup-test-result');
+        if (!btn || !result) return;
+
+        var labels = {
+            test: card.dataset.testLabel,
+            testing: card.dataset.testingLabel,
+            selfNumber: card.dataset.selfNumber,
+            ok: card.dataset.testOk,
+            timeout: card.dataset.testTimeout,
+            failed: card.dataset.testFailed,
+            noSelf: card.dataset.testNoSelf,
+        };
+
+        btn.addEventListener('click', function () {
+            btn.disabled = true;
+            btn.textContent = labels.testing;
+            result.classList.remove('d-none');
+            result.className = 'mt-3 alert alert-secondary';
+            result.textContent = '…';
+
+            fetch('/setup/test', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: '{}',
+            }).then(function (resp) {
+                return resp.json().then(function (j) {
+                    return { status: resp.status, body: j };
+                });
+            }).then(function (r) {
+                showTestResult(r.status, r.body);
+            }).catch(function (err) {
+                showTestResult(0, { error: String(err) });
+            }).finally(function () {
+                btn.disabled = false;
+                btn.textContent = labels.test;
+            });
+        });
+
+        function showTestResult(status, body) {
+            result.classList.remove('d-none');
+            if (status === 400 && body && body.error &&
+                body.error.indexOf('SELF_NUMBER') >= 0) {
+                result.className = 'mt-3 alert alert-warning';
+                result.textContent = labels.noSelf;
+                return;
+            }
+            if (status !== 200 || (body && body.error && !body.id)) {
+                result.className = 'mt-3 alert alert-danger';
+                var msg = (body && body.error) || 'error';
+                result.textContent = labels.failed + ': ' + msg;
+                return;
+            }
+
+            var statusName = body.status || '?';
+            if (statusName === 'delivered') {
+                result.className = 'mt-3 alert alert-success';
+                result.textContent = labels.ok;
+                return;
+            }
+            if (body.timed_out) {
+                result.className = 'mt-3 alert alert-warning';
+                result.textContent = labels.timeout;
+                return;
+            }
+            if (statusName === 'failed') {
+                result.className = 'mt-3 alert alert-danger';
+                var errMsg = body.error || statusName;
+                result.textContent = labels.failed + ': ' + errMsg;
+                return;
+            }
+            // sent / sent_no_dr / received / queued — промежуточные.
+            result.className = 'mt-3 alert alert-info';
+            result.textContent = labels.ok + ' (status: ' + statusName + ')';
+        }
     }
 
     // ==================== общее ====================
