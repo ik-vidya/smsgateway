@@ -326,25 +326,31 @@ func TestSendNowRetryOnFailure(t *testing.T) {
 		t.Errorf("Stats=%+v", st)
 	}
 
-	// Файл должен быть переименован в приоритет C и остаться в outbox.
-	if h.fileExists(h.outboxDir, "OUTB_+371_00.txt") {
-		t.Error("старый файл остался")
-	}
-	if !h.fileExists(h.outboxDir, "OUTC_+371_00.txt") {
-		t.Error("новый файл с приоритетом C не создан")
+	// Файл НЕ переименовывается: остаётся OUTB_+371_00.txt
+	// с исходным именем. Состояние (retries, priority,
+	// last_error) — только в БД.
+	if !h.fileExists(h.outboxDir, "OUTB_+371_00.txt") {
+		t.Error("файл должен остаться в outbox под исходным именем")
 	}
 	if h.store.EntryCount() != 1 {
 		t.Errorf("entries=%d, ожидалось 1", h.store.EntryCount())
 	}
 
-	// Запись в БД должна указывать на новый путь с retries=1.
+	// Запись в БД: retries=1, priority=C (понижение B→C),
+	// last_error содержит текст ошибки.
 	e, err := h.store.GetOutboxEntry(context.Background(),
-		filepath.Join(h.outboxDir, "OUTC_+371_00.txt"))
+		filepath.Join(h.outboxDir, "OUTB_+371_00.txt"))
 	if err != nil {
 		t.Fatalf("GetOutboxEntry: %v", err)
 	}
-	if e.Retries != 1 || e.Priority != "C" {
-		t.Errorf("entry=%+v", e)
+	if e.Retries != 1 {
+		t.Errorf("Retries=%d, ожидалось 1", e.Retries)
+	}
+	if e.Priority != "C" {
+		t.Errorf("Priority=%q, ожидалось C", e.Priority)
+	}
+	if e.LastError == "" {
+		t.Error("LastError пуст, ожидался текст ошибки")
 	}
 }
 
@@ -358,41 +364,45 @@ func TestSendNowRetriesAcrossScans(t *testing.T) {
 
 	h.writeOutbox(t, "OUTA_+371_00.txt", fileText(`"+371"`, `"x"`))
 
-	// Проход 1: retry, файл становится OUTB.
+	// Проход 1: retry, файл остаётся OUTA.
 	if _, err := h.mgr.SendNow(context.Background()); err != nil {
 		t.Fatalf("SendNow 1: %v", err)
 	}
 	if h.sender.CallCount() != 1 {
 		t.Fatalf("calls=%d", h.sender.CallCount())
 	}
-	if !h.fileExists(h.outboxDir, "OUTB_+371_00.txt") {
-		t.Fatalf("после 1-го прохода нет OUTB")
+	if !h.fileExists(h.outboxDir, "OUTA_+371_00.txt") {
+		t.Fatalf("после 1-го прохода файл не должен переименовываться")
 	}
 
-	// Проход 2: retry снова, файл становится OUTC.
+	e, err := h.store.GetOutboxEntry(context.Background(),
+		filepath.Join(h.outboxDir, "OUTA_+371_00.txt"))
+	if err != nil {
+		t.Fatalf("GetOutboxEntry после 1-го: %v", err)
+	}
+	if e.Retries != 1 || e.Priority != "B" {
+		t.Errorf("после 1-го: entry=%+v, ожидалось retries=1 priority=B", e)
+	}
+
+	// Проход 2: retry снова, файл всё ещё OUTA, retries=2.
 	if _, err := h.mgr.SendNow(context.Background()); err != nil {
 		t.Fatalf("SendNow 2: %v", err)
 	}
 	if h.sender.CallCount() != 2 {
 		t.Fatalf("calls=%d, ожидалось 2", h.sender.CallCount())
 	}
-	if !h.fileExists(h.outboxDir, "OUTC_+371_00.txt") {
-		t.Fatalf("после 2-го прохода нет OUTC")
+	if !h.fileExists(h.outboxDir, "OUTA_+371_00.txt") {
+		t.Fatalf("после 2-го прохода файл всё ещё OUTA")
 	}
 
-	e, err := h.store.GetOutboxEntry(context.Background(),
-		filepath.Join(h.outboxDir, "OUTC_+371_00.txt"))
+	e, err = h.store.GetOutboxEntry(context.Background(),
+		filepath.Join(h.outboxDir, "OUTA_+371_00.txt"))
 	if err != nil {
-		t.Fatalf("GetOutboxEntry: %v", err)
+		t.Fatalf("GetOutboxEntry после 2-го: %v", err)
 	}
 	if e.Retries != 2 || e.Priority != "C" {
-		t.Errorf("entry=%+v, ожидалось retries=2 priority=C", e)
+		t.Errorf("после 2-го: entry=%+v, ожидалось retries=2 priority=C", e)
 	}
-
-	// Проход 3: тот же message_id переиспользуется.
-	// Проверяем, что все три попытки шли в одно сообщение.
-	// (Поскольку mockStore хранит один nextID — это косвенно
-	// проверяется через count сообщений.)
 }
 
 func TestSendNowMaxAttempts(t *testing.T) {
@@ -404,16 +414,19 @@ func TestSendNowMaxAttempts(t *testing.T) {
 
 	h.writeOutbox(t, "OUTA_+371_00.txt", fileText(`"+371"`, `"x"`))
 
-	// Первый проход — retry.
+	// Проход 1: попытка #1, падает, retries=1 < max=2 → retry.
 	if _, err := h.mgr.SendNow(context.Background()); err != nil {
 		t.Fatalf("SendNow 1: %v", err)
 	}
-	// Файл должен быть в OUTB.
-	if !h.fileExists(h.outboxDir, "OUTB_+371_00.txt") {
-		t.Fatalf("после первого прохода нет OUTB")
+	if h.sender.CallCount() != 1 {
+		t.Errorf("calls после 1-го=%d, ожидалось 1", h.sender.CallCount())
+	}
+	// Файл остаётся в outbox с тем же именем (не переименовывается).
+	if !h.fileExists(h.outboxDir, "OUTA_+371_00.txt") {
+		t.Fatalf("после 1-го файл не должен переименовываться")
 	}
 
-	// Второй проход — лимит (2) достигнут, файл в error.
+	// Проход 2: попытка #2, падает, retries=2 >= max=2 → error.
 	st, err := h.mgr.SendNow(context.Background())
 	if err != nil {
 		t.Fatalf("SendNow 2: %v", err)
@@ -421,11 +434,20 @@ func TestSendNowMaxAttempts(t *testing.T) {
 	if st.Failed != 1 {
 		t.Errorf("Stats=%+v", st)
 	}
-	if !h.fileExists(h.errorDir, "OUTB_+371_00.txt") {
-		t.Error("файл не в error")
+	if h.sender.CallCount() != 2 {
+		t.Errorf("calls после 2-го=%d, ожидалось 2 (2 попытки)",
+			h.sender.CallCount())
+	}
+	// В error — с исходным именем.
+	if !h.fileExists(h.errorDir, "OUTA_+371_00.txt") {
+		t.Error("файл не в error (или имя не OUTA)")
+	}
+	if h.fileExists(h.outboxDir, "OUTA_+371_00.txt") {
+		t.Error("файл остался в outbox")
 	}
 	if h.store.EntryCount() != 0 {
-		t.Errorf("запись в gammu_outbox не удалена: %d", h.store.EntryCount())
+		t.Errorf("запись в gammu_outbox не удалена: %d",
+			h.store.EntryCount())
 	}
 }
 

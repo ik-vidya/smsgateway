@@ -422,9 +422,22 @@ func (m *Manager) processFile(ctx context.Context, name string) (fileResult, err
 
 	switch {
 	case entryErr == nil:
-		// Retry: файл уже знаком, переиспользуем MessageID.
-		// retries берём из БД, а не из имени: имя могло быть
-		// переименовано внешним процессом.
+		// Retry: файл уже знаком. Проверяем лимит ДО
+		// отправки — если он исчерпан, сразу в error без
+		// попытки. Это правильно: MaxAttempts — всего
+		// попыток, включая первую.
+		if entry.Retries >= m.cfg.MaxAttempts {
+			m.logger.Warn("gammu: лимит попыток исчерпан",
+				"name", name, "retries", entry.Retries,
+				"max", m.cfg.MaxAttempts,
+				"last_error", entry.LastError)
+			lastErr := errors.New(entry.LastError)
+			if entry.LastError == "" {
+				lastErr = errors.New("max attempts reached")
+			}
+			return m.failPermanently(ctx, full, name,
+				entry.MessageID, lastErr)
+		}
 		msgID = entry.MessageID
 		retries = entry.Retries
 		currentPrio = entry.Priority
@@ -562,23 +575,33 @@ func (m *Manager) handleFailure(ctx context.Context,
 	}
 }
 
+// retryWithLowerPriority фиксирует неудачу в БД, но НЕ
+// переименовывает файл.
+//
+// Почему: при пересборке имени теряется структура. Из полной
+// формы OUTA20261018_000647_6467_+371..._Admin.txtd
+// генерируется короткая OUTB_+371..._99.txtd — теряются
+// timestamp, serial (обрезается до 99) и note. Пользователь
+// видит в sent файл, не имеющий отношения к исходному.
+//
+// Правильно: файл остаётся с тем же именем, состояние
+// (retries, priority, last_error) — в БД. При следующем
+// проходе watcher-а entry будет виден, retries проверен
+// до попытки.
 func (m *Manager) retryWithLowerPriority(ctx context.Context,
 	full, name string, fn FileName,
 	msgID int64, retries int, nextPrio string, sendErr error,
 ) (fileResult, error) {
 
-	newName := BuildOutgoingFileName(nextPrio, fn.Recipient, fn.Serial, fn.Ext)
-	newFull := filepath.Join(m.cfg.OutboxDir, newName)
-	if err := m.moveFile(full, newFull); err != nil {
-		return resultSkipped, fmt.Errorf("переименование в %q: %w", newName, err)
-	}
+	// Имя файла не меняем: обновляем только состояние в БД.
+	// oldPath == newPath.
 	if err := m.store.UpdateOutboxFailure(ctx,
-		full, newFull, retries, nextPrio, sendErr.Error(),
+		full, full, retries, nextPrio, sendErr.Error(),
 	); err != nil {
 		return resultSkipped, fmt.Errorf("UpdateOutboxFailure: %w", err)
 	}
-	m.logger.Info("gammu: файл возвращён в очередь с понижением",
-		"from", name, "to", newName,
+	m.logger.Info("gammu: retry, файл остаётся в outbox",
+		"name", name,
 		"retries", retries, "prio", nextPrio, "err", sendErr)
 	return resultRetried, nil
 }

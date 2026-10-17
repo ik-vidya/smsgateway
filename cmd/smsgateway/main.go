@@ -277,8 +277,9 @@ func runService(_ *cobra.Command, _ []string) error {
 			return err
 		}
 
-		m, err := modem.NewModem(port, profile,
-			cfg.ModemCmdTimeout, slogAdapter{logger})
+		m, err := modem.NewModemWithCMGS(port, profile,
+			cfg.ModemCmdTimeout, cfg.ModemCMGSTimeout,
+			slogAdapter{logger})
 		if err != nil {
 			_ = port.Close()
 			err = fmt.Errorf("создание Modem: %w", err)

@@ -35,9 +35,21 @@ type Transport interface {
 
 // Config — параметры транспорта.
 type Config struct {
+	// CmdTimeout — таймаут обычных AT-команд (AT, ATI, CGMI...).
 	CmdTimeout time.Duration
-	Profile    profiles.Profile
-	Logger     Logger
+
+	// CMGSTimeout — таймаут AT+CMGS (отправка SMS). Отдельно
+	// от CmdTimeout: SIM800L при занятой сети может «думать»
+	// до 30-60s перед ответом на prompt `> ` или +CMGS.
+	// Слишком короткий таймаут приводит к отмене висящей
+	// CMGS через ESC и повторной отправке — это лишний
+	// AT-трафик и шум в логах.
+	//
+	// 0 — 60s.
+	CMGSTimeout time.Duration
+
+	Profile profiles.Profile
+	Logger  Logger
 }
 
 // Logger — минимальный интерфейс логгера.
@@ -55,6 +67,9 @@ func New(t Transport, cfg Config) (*ATTransport, error) {
 	}
 	if cfg.CmdTimeout <= 0 {
 		cfg.CmdTimeout = 5 * time.Second
+	}
+	if cfg.CMGSTimeout <= 0 {
+		cfg.CMGSTimeout = 60 * time.Second
 	}
 	if cfg.Logger == nil {
 		cfg.Logger = nopLogger{}
@@ -131,14 +146,21 @@ func (a *ATTransport) exec(ctx context.Context, cmd string, payload []byte, wait
 		return Response{}, fmt.Errorf("запись команды %q: %w", cmd, err)
 	}
 
-	timeout := a.cfg.CmdTimeout
+	// Для AT+CMGS используем отдельный таймаут: prompt `> `
+	// и финальный +CMGS могут приходить медленно (до 60s при
+	// занятой сети). Для остальных команд — CmdTimeout.
+	baseTimeout := a.cfg.CmdTimeout
+	if waitPrompt && a.cfg.CMGSTimeout > 0 {
+		baseTimeout = a.cfg.CMGSTimeout
+	}
+	timeout := baseTimeout
 	if deadline, ok := ctx.Deadline(); ok {
 		if d := time.Until(deadline); d < timeout {
 			timeout = d
 		}
 	}
 	if timeout <= 0 {
-		timeout = a.cfg.CmdTimeout
+		timeout = baseTimeout
 	}
 
 	resp := Response{Command: cmd}

@@ -23,6 +23,7 @@ type Config struct {
 	SerialPort         string
 	SerialBaud         int
 	ModemCmdTimeout    time.Duration
+	ModemCMGSTimeout   time.Duration
 	ModemProfile       string
 	ModemStorage       string
 	ModemPIN           string
@@ -110,6 +111,9 @@ func Load(path string) (*Config, error) {
 		return nil, err
 	}
 	if c.ModemCmdTimeout, err = envDuration("MODEM_CMD_TIMEOUT", 5*time.Second); err != nil {
+		return nil, err
+	}
+	if c.ModemCMGSTimeout, err = envDuration("MODEM_CMGS_TIMEOUT", 60*time.Second); err != nil {
 		return nil, err
 	}
 	if c.SMSRetention, err = envDuration("SMS_RETENTION", 0); err != nil {

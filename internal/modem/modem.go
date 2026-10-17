@@ -45,14 +45,31 @@ type Modem struct {
 //
 // Профиль определяет специфичные для модема команды и обходы
 // (например, SIM800Profile включает AT+CNMI и AT+CSMP).
+//
+// CMGSTimeout равен CmdTimeout (для обратной совместимости).
+// Для отдельного таймаута AT+CMGS используйте NewModemWithCMGS.
 func NewModem(t Transport, profile profiles.Profile, cmdTimeout time.Duration, logger Logger) (*Modem, error) {
+	return NewModemWithCMGS(t, profile, cmdTimeout, 0, logger)
+}
+
+// NewModemWithCMGS создаёт Modem с отдельным таймаутом для
+// AT+CMGS.
+//
+// cmgsTimeout — таймаут AT+CMGS (prompt `> ` и финальный
+// +CMGS/OK). 0 — 60s. Рекомендуется 60s для SIM800L: при
+// занятой сети модем может отвечать медленно, и короткий
+// таймаут приводит к отмене висящей CMGS и повторной отправке.
+func NewModemWithCMGS(t Transport, profile profiles.Profile,
+	cmdTimeout, cmgsTimeout time.Duration, logger Logger,
+) (*Modem, error) {
 	if profile == nil {
 		profile = profiles.Generic{}
 	}
 	at, err := New(t, Config{
-		CmdTimeout: cmdTimeout,
-		Profile:    profile,
-		Logger:     logger,
+		CmdTimeout:  cmdTimeout,
+		CMGSTimeout: cmgsTimeout,
+		Profile:     profile,
+		Logger:      logger,
 	})
 	if err != nil {
 		return nil, err

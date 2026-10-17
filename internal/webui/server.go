@@ -282,23 +282,12 @@ func fmtTime(t time.Time) string {
 // withStaticContentType задаёт Content-Type по расширению до
 // вызова next.
 //
-// Зачем: http.FileServer полагается на mime.TypeByExtension,
-// а тот на сервере без /etc/mime.types (или с минимальным
-// набором) может вернуть пусто. Тогда FileServer читает
-// первые 512 байт и вызывает http.DetectContentType — для
-// .css и .js это даёт "text/plain". С X-Content-Type-Options:
-// nosniff браузер такой ресурс блокирует:
-//
-//	Ресурс "…/bootstrap.min.css" был заблокирован из-за
-//	несоответствия MIME-типа ("text/plain")
-//	(X-Content-Type-Options: nosniff)
-//
-// withStaticContentType ставит Content-Type явно, до вызова
-// FileServer. FileServer видит, что заголовок уже есть, и не
-// перезаписывает.
-//
-// Путь в r.URL.Path — ещё с префиксом /static/ (обёртка стоит
-// до StripPrefix), поэтому filepath.Ext работает как обычно.
+// Причина: http.FileServer полагается на mime.TypeByExtension,
+// а на сервере без /etc/mime.types (или с минимальным набором)
+// он возвращает пусто. Тогда FileServer читает первые 512 байт
+// и вызывает http.DetectContentType — для .css и .js это даёт
+// "text/plain". С X-Content-Type-Options: nosniff браузер
+// блокирует такой ресурс.
 func withStaticContentType(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ext := strings.ToLower(filepath.Ext(r.URL.Path))
@@ -339,3 +328,24 @@ func withStaticContentType(next http.Handler) http.Handler {
 		next.ServeHTTP(w, r)
 	})
 }
+
+// withStaticContentType задаёт Content-Type по расширению до
+// вызова next.
+//
+// Зачем: http.FileServer полагается на mime.TypeByExtension,
+// а тот на сервере без /etc/mime.types (или с минимальным
+// набором) может вернуть пусто. Тогда FileServer читает
+// первые 512 байт и вызывает http.DetectContentType — для
+// .css и .js это даёт "text/plain". С X-Content-Type-Options:
+// nosniff браузер такой ресурс блокирует:
+//
+//	Ресурс "…/bootstrap.min.css" был заблокирован из-за
+//	несоответствия MIME-типа ("text/plain")
+//	(X-Content-Type-Options: nosniff)
+//
+// withStaticContentType ставит Content-Type явно, до вызова
+// FileServer. FileServer видит, что заголовок уже есть, и не
+// перезаписывает.
+//
+// Путь в r.URL.Path — ещё с префиксом /static/ (обёртка стоит
+// до StripPrefix), поэтому filepath.Ext работает как обычно.
