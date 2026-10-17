@@ -154,10 +154,11 @@ func (s *Service) Run(ctx context.Context) error {
 		s.recoverGammuOrphans(ctx)
 	}
 
-	s.wg.Add(3)
+	s.wg.Add(4)
 	go s.urcLoop(ctx)
 	go s.sendLoop(ctx)
 	go s.pendingLoop(ctx)
+	go s.networkLoop(ctx)
 
 	if s.gammu != nil {
 		s.wg.Add(1)

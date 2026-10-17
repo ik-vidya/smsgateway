@@ -44,7 +44,12 @@ SIM по PIN. Тесты: 38.
 
 URC-цикл, отправка с retry, pending references, `HandleDeliveryReport`,
 `SendTestSMS`, `RunDiagnostics`. Принимает `Notifier` — критические
-ошибки уходят в Telegram. Тесты: 12.
+ошибки уходят в Telegram. Фоновый опрос сети (`networkLoop`):
+`AT+CREG?` и `AT+CSQ` раз в 30 секунд, первый опрос — сразу
+после `Init`, чтобы dashboard показывал актуальное состояние
+(URC `+CREG` по умолчанию не приходит — нужен `AT+CREG=2`, его
+пока не шлём). `Registered()` возвращает `networkStat==1 || ==5`.
+Тесты: 20.
 
 ### Диагностика (`internal/diagnostics`)
 

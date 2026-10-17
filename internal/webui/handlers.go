@@ -44,14 +44,19 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
 		configured := s.cfg.SerialPort != "" &&
 			s.cfg.SerialPort != "none"
+		registered := s.svc.Registered()
 
-		dbm := 0
-		if csq >= 0 && csq <= 31 {
+		// CSQ=99 — «неизвестно/не определяется», CSQ=0 — «≤ −113 dBm».
+		// В обоих случаях DBM бесполезен.
+		signalKnown := csq >= 1 && csq <= 31
+		var dbm int
+		if signalKnown {
 			dbm = -113 + 2*csq
 		}
 
 		data["Modem"] = ModemView{
 			Configured:   configured,
+			Registered:   registered,
 			Port:         s.cfg.SerialPort,
 			Profile:      s.cfg.ModemProfile,
 			Manufacturer: info.Manufacturer,
@@ -59,6 +64,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 			Revision:     info.Revision,
 			IMEI:         info.IMEI,
 			Signal:       csq,
+			SignalKnown:  signalKnown,
 			DBM:          dbm,
 			Network:      netStat,
 			NetworkText:  networkStatusText(netStat),
@@ -400,8 +406,18 @@ type CounterView struct {
 }
 
 // ModemView — представление модема для шаблона.
+//
+// Configured и Registered — независимые признаки:
+//   - Configured — SERIAL_PORT задан и != "none"
+//     (порт-объект существует, но не обязательно открыт);
+//   - Registered — CREG stat 1 или 5 (модем в сети).
+//
+// SignalKnown — CSQ в диапазоне 1..31. При CSQ=0 (≤−113 dBm)
+// или 99 (неизвестно) в шаблоне показываем «нет сигнала»,
+// DBM не вычисляется.
 type ModemView struct {
 	Configured   bool
+	Registered   bool
 	Port         string
 	Profile      string
 	Manufacturer string
@@ -409,6 +425,7 @@ type ModemView struct {
 	Revision     string
 	IMEI         string
 	Signal       int
+	SignalKnown  bool
 	DBM          int
 	Network      int
 	NetworkText  string

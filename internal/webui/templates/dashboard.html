@@ -8,11 +8,22 @@
             <div class="card-body">
                 {{ if .Modem.Configured }}
                     <p class="mb-2">
-                        <span class="badge bg-success">
-                            {{ T . "dashboard.modem.configured" }}
+                        <span class="badge bg-info">
+                            {{ T . "dashboard.modem.port_open" }}
                         </span>
+                        {{ if .Modem.Registered }}
+                            <span class="badge bg-success">
+                                {{ T . "dashboard.modem.registered" }}
+                            </span>
+                        {{ else }}
+                            <span class="badge bg-warning text-dark">
+                                {{ T . "dashboard.modem.not_registered" }}
+                            </span>
+                        {{ end }}
+                    </p>
+                    <p class="mb-3 small text-muted">
                         <code>{{ .Modem.Port }}</code>
-                        <span class="text-muted">({{ .Modem.Profile }})</span>
+                        {{ .Modem.Profile }}
                     </p>
                     <dl class="row mb-0 small">
                         <dt class="col-sm-4">{{ T . "dashboard.modem.manufacturer" }}</dt>
@@ -25,11 +36,21 @@
                         <dd class="col-sm-8"><code>{{ or .Modem.IMEI "—" }}</code></dd>
                         <dt class="col-sm-4">{{ T . "dashboard.modem.signal" }}</dt>
                         <dd class="col-sm-8">
-                            {{ .Modem.Signal }} / 31
-                            {{ if .Modem.DBM }}<span class="text-muted">({{ .Modem.DBM }} dBm)</span>{{ end }}
+                            {{ if .Modem.SignalKnown }}
+                                {{ .Modem.Signal }} / 31
+                                <span class="text-muted">({{ .Modem.DBM }} dBm)</span>
+                            {{ else }}
+                                <span class="text-muted">{{ T . "dashboard.modem.signal_none" }}</span>
+                            {{ end }}
                         </dd>
                         <dt class="col-sm-4">{{ T . "dashboard.modem.network" }}</dt>
-                        <dd class="col-sm-8">{{ or .Modem.NetworkText (printf "status %d" .Modem.Network) }}</dd>
+                        <dd class="col-sm-8">
+                            {{ if .Modem.Registered }}
+                                {{ T . "dashboard.modem.registered" }}
+                            {{ else }}
+                                {{ or .Modem.NetworkText (printf "status %d" .Modem.Network) }}
+                            {{ end }}
+                        </dd>
                     </dl>
                 {{ else }}
                     <p class="text-muted mb-0">{{ T . "dashboard.modem.not_configured" }}</p>
