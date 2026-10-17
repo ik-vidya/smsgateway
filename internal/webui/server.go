@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"html/template"
+	"io/fs"
 	"log/slog"
 	"net"
 	"net/http"
@@ -158,9 +159,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /setup/test", s.handleSetupTest)
 	mux.HandleFunc("GET /lang/{code}", s.handleLangSet)
 
-	staticFSHandler := http.StripPrefix("/static/",
-		http.FileServer(http.FS(staticFS)))
-	mux.Handle("GET /static/", withStaticContentType(staticFSHandler))
+	mux.Handle("GET /static/", newStaticHandler())
 
 	return withSecurityHeaders(withCSRF(mux))
 }
@@ -327,6 +326,39 @@ func withStaticContentType(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// newStaticHandler обслуживает /static/* из встроенного embed.FS.
+//
+// Важно: //go:embed static сохраняет файлы в embed.FS с
+// префиксом "static/" — то есть static/app.css, а не app.css.
+// FileServer ищет путь относительно корня FS, и после
+// StripPrefix("/static/") от "/static/app.css" остаётся
+// "app.css" — в корне FS такого файла нет, FileServer
+// возвращает 404.
+//
+// Симптом в логах: curl -I /static/app.css →
+//
+//	HTTP/1.1 404 Not Found
+//	Content-Length: 19   ← "404 page not found\n"
+//
+// Браузер при этом жалуется на MIME (text/plain для
+// 404-страницы + nosniff).
+//
+// Решение: fs.Sub(staticFS, "static") сдвигает корень FS в
+// поддерево "static/". После этого "app.css" в FileServer
+// соответствует "static/app.css" в бинарнике.
+func newStaticHandler() http.Handler {
+	sub, err := fs.Sub(staticFS, "static")
+	if err != nil {
+		// Не должно случиться: embed.FS гарантированно содержит
+		// "static". Но если что-то не так — лучше 404 и лог,
+		// чем паника.
+		slog.Error("webui: fs.Sub(staticFS, \"static\")", "err", err)
+		return http.NotFoundHandler()
+	}
+	return withStaticContentType(
+		http.StripPrefix("/static/", http.FileServer(http.FS(sub))))
 }
 
 // withStaticContentType задаёт Content-Type по расширению до
