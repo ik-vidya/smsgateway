@@ -148,10 +148,11 @@ func (c *Config) validate() error {
 		errs = append(errs, errors.New("нужен API_KEY или API_KEYS"))
 	}
 	switch strings.ToLower(c.ModemProfile) {
-	case "sim800", "quectel", "telit", "generic":
+	case "sim800", "quectel", "telit", "huawei", "generic":
 	default:
 		errs = append(errs, fmt.Errorf(
-			"MODEM_PROFILE должен быть sim800|quectel|telit|generic, получено %q",
+			"MODEM_PROFILE должен быть "+
+				"sim800|quectel|telit|huawei|generic, получено %q",
 			c.ModemProfile))
 	}
 	switch strings.ToLower(c.ModemStorage) {

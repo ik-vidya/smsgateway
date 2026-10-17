@@ -197,3 +197,52 @@ func TestLoadGammuBadMaxAttempts(t *testing.T) {
 		t.Fatal("ожидалась ошибка для GAMMU_OUTBOX_MAX_ATTEMPTS=0")
 	}
 }
+
+// ==================== modem profile validation ====================
+
+func TestModemProfileValidation(t *testing.T) {
+	cases := []struct {
+		profile string
+		ok      bool
+	}{
+		{"sim800", true},
+		{"SIM800", true},
+		{"quectel", true},
+		{"telit", true},
+		{"huawei", true},
+		{"Huawei", true},
+		{"generic", true},
+		{"", true}, // пусто = generic по умолчанию
+		{"nokia", false},
+		{"sim900", false},
+	}
+	for _, c := range cases {
+		t.Run(c.profile, func(t *testing.T) {
+			clearEnv(t, "SERIAL_PORT", "DB_PATH", "API_KEY",
+				"MODEM_PROFILE")
+			env := "SERIAL_PORT=none\n" +
+				"DB_PATH=:memory:\n" +
+				"API_KEY=test\n"
+			if c.profile != "" {
+				env += "MODEM_PROFILE=" + c.profile + "\n"
+			}
+			_, err := Load(writeEnv(t, env))
+			if c.ok && err != nil {
+				t.Errorf("профиль %q: неожиданная ошибка: %v",
+					c.profile, err)
+			}
+			if !c.ok && err == nil {
+				t.Errorf("профиль %q: ожидалась ошибка", c.profile)
+			}
+		})
+	}
+}
+
+// clearEnv — сброс переменных окружения между тестами.
+// (в файле уже есть clearGammuEnv, но она с фиксированным списком)
+func clearEnv(t *testing.T, keys ...string) {
+	t.Helper()
+	for _, k := range keys {
+		_ = os.Unsetenv(k)
+	}
+}

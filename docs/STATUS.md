@@ -34,7 +34,11 @@ SIM по PIN. Тесты: 38.
 
 ### Профили (`internal/profiles`)
 
-`Profile` с Workarounds/PreInitHook/PreSendHook. `Generic`, `SIM800`.
+`Profile` с Workarounds/PreInitHook/PreSendHook. `Generic`,
+`SIM800`, `Quectel`, `Telit`, `Huawei` (три последних —
+минимальные обёртки над Generic; специфических обходов пока нет).
+`Get()` case-insensitive, `Auto()` выбирает по Manufacturer/Model.
+Тесты: 5.
 
 ### Сервис (`internal/service`)
 

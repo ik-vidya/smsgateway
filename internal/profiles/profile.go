@@ -3,12 +3,13 @@
 //
 // Профиль задаётся в конфиге (MODEM_PROFILE). "generic" — только
 // общие AT-команды, без специфичных надстроек. Специфичные профили
-// (sim800, quectel, telit) включают дополнительные обходы.
+// (sim800, quectel, telit, huawei) включают дополнительные обходы.
 package profiles
 
 import (
 	"context"
 	"fmt"
+	"strings"
 )
 
 // Info — идентификация модема, полученная через ATI/AT+CGMI/AT+CGMM/AT+CGMR.
@@ -70,22 +71,35 @@ type Profile interface {
 	PreSendHook(ctx context.Context, m ModemHook) error
 }
 
-// Get возвращает профиль по имени. Если имя неизвестно — ошибка.
+// Get возвращает профиль по имени. Регистр не важен: "SIM800" и
+// "sim800" эквивалентны. Если имя неизвестно — ошибка.
 func Get(name string) (Profile, error) {
-	switch name {
+	switch strings.ToLower(strings.TrimSpace(name)) {
 	case "generic", "":
 		return Generic{}, nil
 	case "sim800":
 		return SIM800{}, nil
+	case "quectel":
+		return Quectel{}, nil
+	case "telit":
+		return Telit{}, nil
+	case "huawei":
+		return Huawei{}, nil
 	}
 	return nil, fmt.Errorf("неизвестный профиль %q", name)
 }
 
-// Auto определить профиль по информации о модеме. Возвращает
+// Auto определяет профиль по информации о модеме. Возвращает
 // первый подходящий или Generic, если ни один не подошёл.
+//
+// Порядок важен: специфичные профили (sim800) идут раньше общих
+// (quectel/telit/huawei), чтобы более точный Match выигрывал.
 func Auto(info Info) Profile {
 	all := []Profile{
 		SIM800{},
+		Quectel{},
+		Telit{},
+		Huawei{},
 	}
 	for _, p := range all {
 		if p.Match(info) {
