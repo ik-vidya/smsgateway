@@ -7,6 +7,7 @@
   "nav.compose": "Compose",
   "nav.inbox": "Inbox",
   "nav.outbox": "Outbox",
+  "nav.logs": "Logs",
   "nav.lang": "Language",
 
   "dashboard.title": "Dashboard",
@@ -64,5 +65,17 @@
   "messages.total": "Total",
   "messages.page": "Page",
   "messages.prev": "Previous",
-  "messages.next": "Next"
+  "messages.next": "Next",
+
+  "logs.title": "Logs",
+  "logs.pause": "Pause",
+  "logs.resume": "Resume",
+  "logs.clear": "Clear",
+  "logs.level": "Level",
+  "logs.level.all": "All",
+  "logs.level.info": "Info",
+  "logs.level.warn": "Warn",
+  "logs.level.error": "Error",
+  "logs.empty": "Waiting for log entries…",
+  "logs.hint": "Live stream from /logs/stream"
 }

@@ -1,0 +1,42 @@
+{{ define "content" -}}
+<h1>{{ T . "logs.title" }}</h1>
+
+{{ if .ErrorMessage }}
+<div class="alert alert-danger">{{ .ErrorMessage }}</div>
+{{ end }}
+
+{{ if .HasStream }}
+<div class="row g-2 align-items-center mb-2">
+    <div class="col-auto">
+        <button type="button" id="logs-pause" class="btn btn-sm btn-outline-secondary"
+                data-pause-label="{{ T . "logs.pause" }}"
+                data-resume-label="{{ T . "logs.resume" }}">
+            {{ T . "logs.pause" }}
+        </button>
+    </div>
+    <div class="col-auto">
+        <button type="button" id="logs-clear" class="btn btn-sm btn-outline-secondary">
+            {{ T . "logs.clear" }}
+        </button>
+    </div>
+    <div class="col-auto">
+        <label for="logs-level" class="form-label mb-0 small">
+            {{ T . "logs.level" }}:
+        </label>
+    </div>
+    <div class="col-auto">
+        <select id="logs-level" class="form-select form-select-sm">
+            <option value="DEBUG">{{ T . "logs.level.all" }}</option>
+            <option value="INFO" selected>{{ T . "logs.level.info" }}</option>
+            <option value="WARN">{{ T . "logs.level.warn" }}</option>
+            <option value="ERROR">{{ T . "logs.level.error" }}</option>
+        </select>
+    </div>
+    <div class="col-auto text-muted small">
+        {{ T . "logs.hint" }}
+    </div>
+</div>
+
+<div id="logs" data-empty="{{ T . "logs.empty" }}"></div>
+{{ end }}
+{{- end }}

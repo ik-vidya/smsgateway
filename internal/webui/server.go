@@ -23,6 +23,7 @@ import (
 	"github.com/nicksnyder/go-i18n/v2/i18n"
 
 	"github.com/ik-vidya/smsgateway/internal/config"
+	"github.com/ik-vidya/smsgateway/internal/logging"
 	"github.com/ik-vidya/smsgateway/internal/service"
 	"github.com/ik-vidya/smsgateway/internal/storage"
 )
@@ -38,6 +39,7 @@ type Server struct {
 	cfg     *config.Config
 	store   *storage.Store
 	svc     *service.Service
+	logs    *logging.Buffer
 	logger  *slog.Logger
 	version string
 
@@ -47,11 +49,13 @@ type Server struct {
 	http *http.Server
 }
 
-// New создаёт сервер. Возвращает ошибку, если WEBUI_AUTH_MODE не
-// "none" (OIDC пока не реализован) или если шаблоны/локали не
-// собираются.
+// New создаёт сервер.
+//
+// logs может быть nil — тогда страница /logs покажет предупреждение,
+// а /logs/stream вернёт 503.
 func New(cfg *config.Config, store *storage.Store, svc *service.Service,
-	logger *slog.Logger, version string) (*Server, error) {
+	logs *logging.Buffer, logger *slog.Logger, version string,
+) (*Server, error) {
 
 	if logger == nil {
 		logger = slog.Default()
@@ -83,6 +87,7 @@ func New(cfg *config.Config, store *storage.Store, svc *service.Service,
 		cfg:       cfg,
 		store:     store,
 		svc:       svc,
+		logs:      logs,
 		logger:    logger,
 		version:   version,
 		bundle:    bundle,
@@ -94,8 +99,11 @@ func New(cfg *config.Config, store *storage.Store, svc *service.Service,
 		Handler:           s.routes(),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
-		WriteTimeout:      30 * time.Second,
-		IdleTimeout:       60 * time.Second,
+		// Для SSE WriteTimeout должен быть больше или равен
+		// интервалу keepalive (15s). Оставляем 0 — таймаут не
+		// ставим: SSE-стримы живут дольше, чем обычные запросы.
+		WriteTimeout: 0,
+		IdleTimeout:  60 * time.Second,
 	}
 	return s, nil
 }
@@ -130,6 +138,8 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /outbox", s.handleOutbox)
 	mux.HandleFunc("GET /compose", s.handleComposeForm)
 	mux.HandleFunc("POST /compose", s.handleComposeSubmit)
+	mux.HandleFunc("GET /logs", s.handleLogs)
+	mux.HandleFunc("GET /logs/stream", s.handleLogsStream)
 	mux.HandleFunc("GET /lang/{code}", s.handleLangSet)
 
 	staticHandler := http.StripPrefix("/static/",
@@ -139,20 +149,18 @@ func (s *Server) routes() http.Handler {
 	return withSecurityHeaders(withCSRF(mux))
 }
 
-// pageFiles сопоставляет ключ страницы (используется в шаблонах и
-// в data["ActivePage"]) имени файла templates/<file>.html.
-//
-// inbox и outbox используют один и тот же файл messages.html.
+// pageFiles сопоставляет ключ страницы имени файла
+// templates/<file>.html.
 var pageFiles = map[string]string{
 	"dashboard": "dashboard",
 	"compose":   "compose",
 	"inbox":     "messages",
 	"outbox":    "messages",
+	"logs":      "logs",
 }
 
 // buildTemplates собирает по отдельному *template.Template на
-// каждую страницу: layout и partials переиспользуются, "content"
-// берётся из конкретной страницы.
+// каждую страницу.
 func buildTemplates() (map[string]*template.Template, error) {
 	out := make(map[string]*template.Template, len(pageFiles))
 
@@ -202,7 +210,6 @@ func (s *Server) render(w http.ResponseWriter, page string,
 }
 
 // renderFragment рендерит только именованный фрагмент, без layout.
-// Используется для ответов на htmx-запросы.
 func (s *Server) renderFragment(w http.ResponseWriter, page, fragment string,
 	data map[string]any) {
 

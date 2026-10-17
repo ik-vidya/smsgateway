@@ -23,3 +23,42 @@ dl.row dt {
 code {
     word-break: break-all;
 }
+
+/* ==================== logs ==================== */
+
+#logs {
+    background: #fbfbfb;
+    border: 1px solid #dee2e6;
+    border-radius: 4px;
+    height: 70vh;
+    overflow-y: auto;
+    padding: 8px 10px;
+    font-family: SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 12px;
+    line-height: 1.4;
+}
+
+.log-line {
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+
+.log-time {
+    color: #6c757d;
+}
+
+.log-level {
+    font-weight: 600;
+    display: inline-block;
+    min-width: 5em;
+}
+
+.log-DEBUG .log-level { color: #6c757d; }
+.log-INFO  .log-level { color: #198754; }
+.log-WARN  .log-level { color: #fd7e14; }
+.log-ERROR .log-level { color: #dc3545; }
+
+.log-attrs {
+    color: #6c757d;
+    font-style: italic;
+}

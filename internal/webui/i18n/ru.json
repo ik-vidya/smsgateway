@@ -7,6 +7,7 @@
   "nav.compose": "Отправить",
   "nav.inbox": "Входящие",
   "nav.outbox": "Исходящие",
+  "nav.logs": "Логи",
   "nav.lang": "Язык",
 
   "dashboard.title": "Панель управления",
@@ -64,5 +65,17 @@
   "messages.total": "Всего",
   "messages.page": "Стр.",
   "messages.prev": "Назад",
-  "messages.next": "Вперёд"
+  "messages.next": "Вперёд",
+
+  "logs.title": "Логи",
+  "logs.pause": "Пауза",
+  "logs.resume": "Продолжить",
+  "logs.clear": "Очистить",
+  "logs.level": "Уровень",
+  "logs.level.all": "Все",
+  "logs.level.info": "Info",
+  "logs.level.warn": "Warn",
+  "logs.level.error": "Error",
+  "logs.empty": "Ждём записи лога…",
+  "logs.hint": "Живой поток из /logs/stream"
 }

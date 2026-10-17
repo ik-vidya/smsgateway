@@ -1,34 +1,63 @@
 // Package logging — настройка log/slog с уровнями и форматом.
+//
+// В базовом варианте (New) логгер пишет только в stdout.
+// В расширенном (NewWithBuffer) — ещё и в in-memory ring buffer
+// для Web UI.
 package logging
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"strings"
 )
 
+// ErrNoSubscription — попытка Unsubscribe с неизвестным id.
+var ErrNoSubscription = errors.New("logging: unknown subscription")
+
 // New создаёт slog.Logger с заданными уровнем и форматом.
 //
 // level: debug | info | warn | error
 // format: text | json
 func New(level, format string) (*slog.Logger, error) {
+	h, err := newHandler(level, format)
+	if err != nil {
+		return nil, err
+	}
+	return slog.New(h), nil
+}
+
+// NewWithBuffer создаёт slog.Logger, который пишет одновременно в
+// stdout (как New) и в in-memory Buffer для Web UI.
+//
+// Если buf == nil, ведёт себя как New.
+func NewWithBuffer(level, format string, buf *Buffer) (*slog.Logger, error) {
+	h, err := newHandler(level, format)
+	if err != nil {
+		return nil, err
+	}
+	if buf == nil {
+		return slog.New(h), nil
+	}
+	return slog.New(newBufferHandler(h, buf)), nil
+}
+
+// newHandler собирает внутренний Handler по уровню и формату.
+func newHandler(level, format string) (slog.Handler, error) {
 	lvl, err := parseLevel(level)
 	if err != nil {
 		return nil, err
 	}
 	opts := &slog.HandlerOptions{Level: lvl}
 
-	var h slog.Handler
 	switch strings.ToLower(format) {
 	case "json":
-		h = slog.NewJSONHandler(os.Stdout, opts)
+		return slog.NewJSONHandler(os.Stdout, opts), nil
 	case "", "text":
-		h = slog.NewTextHandler(os.Stdout, opts)
-	default:
-		return nil, fmt.Errorf("неизвестный формат лога %q", format)
+		return slog.NewTextHandler(os.Stdout, opts), nil
 	}
-	return slog.New(h), nil
+	return nil, fmt.Errorf("неизвестный формат лога %q", format)
 }
 
 func parseLevel(s string) (slog.Level, error) {

@@ -7,6 +7,7 @@
   "nav.compose": "Rakstīt",
   "nav.inbox": "Ienākošās",
   "nav.outbox": "Izejošās",
+  "nav.logs": "Žurnāli",
   "nav.lang": "Valoda",
 
   "dashboard.title": "Vadības panelis",
@@ -64,5 +65,17 @@
   "messages.total": "Kopā",
   "messages.page": "Lpp.",
   "messages.prev": "Iepriekš",
-  "messages.next": "Tālāk"
+  "messages.next": "Tālāk",
+
+  "logs.title": "Žurnāli",
+  "logs.pause": "Pauze",
+  "logs.resume": "Turpināt",
+  "logs.clear": "Notīrīt",
+  "logs.level": "Līmenis",
+  "logs.level.all": "Visi",
+  "logs.level.info": "Info",
+  "logs.level.warn": "Warn",
+  "logs.level.error": "Error",
+  "logs.empty": "Gaidām žurnāla ierakstus…",
+  "logs.hint": "Tiešraide no /logs/stream"
 }

@@ -102,7 +102,20 @@ ru/lv/en (go-i18n/v2). Bootstrap 5.2 и htmx 4.0 хранятся локальн
   `HX-Request`;
 - `GET /outbox` — исходящие, те же фильтры и пагинация;
 - `GET /compose`, `POST /compose` — отправка;
+- `GET /logs` — live-поток логов (SSE);
+- `GET /logs/stream` — SSE-эндпоинт (JSON, keepalive 15s);
 - `GET /lang/{code}` — переключение языка.
+
+### Логи через SSE
+
+`internal/logging` содержит ring buffer на 1000 записей +
+pub/sub. `NewWithBuffer` создаёт `slog.Handler`, который пишет
+и в stdout, и в буфер. Страница `/logs` подключается к
+`/logs/stream` через `EventSource`, рисует записи в DOM
+(лимит 2000), фильтрует по уровню, умеет ставиться на паузу
+и чиститься. Автопрокрутка вниз отключается, если пользователь
+прокрутил вверх. При переполнении канала подписчика шлём
+`event: warning` с числом пропущенных записей.
 
 ### Мультимодемность
 

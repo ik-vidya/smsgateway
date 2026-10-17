@@ -20,7 +20,7 @@ build: tidy fmt vet
 	CGO_ENABLED=0 go build $(GOFLAGS) -ldflags '$(LDFLAGS)' -o $(BIN_DIR)/$(BINARY) $(PKG)
 
 run: build
-	./$(BIN_DIR)/$(BINARY) -config .env
+	sudo ./$(BIN_DIR)/$(BINARY) --config .env
 
 test:
 	go test ./...

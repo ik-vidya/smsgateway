@@ -160,7 +160,11 @@ func runService(_ *cobra.Command, _ []string) error {
 		return err
 	}
 
-	logger, err := logging.New(cfg.LogLevel, cfg.LogFormat)
+	// In-memory buffer для страницы /logs (SSE). Создаётся всегда,
+	// даже если webui выключен — стоимость минимальная.
+	logBuffer := logging.NewBuffer(1000)
+
+	logger, err := logging.NewWithBuffer(cfg.LogLevel, cfg.LogFormat, logBuffer)
 	if err != nil {
 		return err
 	}
@@ -342,7 +346,7 @@ func runService(_ *cobra.Command, _ []string) error {
 	var webServer *webui.Server
 	webErr := make(chan error, 1)
 	if cfg.WebUIEnabled {
-		ws, err := webui.New(cfg, store, svc, logger, version)
+		ws, err := webui.New(cfg, store, svc, logBuffer, logger, version)
 		if err != nil {
 			err = fmt.Errorf("web ui: %w", err)
 			notifier.Notify(ctx, notify.LevelCritical, err)
