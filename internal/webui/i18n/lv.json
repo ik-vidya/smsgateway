@@ -8,6 +8,7 @@
   "nav.inbox": "Ienākošās",
   "nav.outbox": "Izejošās",
   "nav.logs": "Žurnāli",
+  "nav.setup": "Iestatīšana",
   "nav.lang": "Valoda",
 
   "dashboard.title": "Vadības panelis",
@@ -77,5 +78,22 @@
   "logs.level.warn": "Warn",
   "logs.level.error": "Error",
   "logs.empty": "Gaidām žurnāla ierakstus…",
-  "logs.hint": "Tiešraide no /logs/stream"
+  "logs.hint": "Tiešraide no /logs/stream",
+
+  "setup.title": "Modema iestatīšana",
+  "setup.intro": "Pievienojiet modemu USB portam. Tas parādīsies sarakstā zemāk. Nospiediet «Pārbaudīt», pēc tam «Saglabāt un pārstartēt».",
+  "setup.current": "Pašreizējais ports",
+  "setup.ports": "Atrastie porti",
+  "setup.waiting": "Gaidām modema pievienošanu…",
+  "setup.probe": "Pārbaudīt",
+  "setup.probing": "Pārbauda…",
+  "setup.manufacturer": "Ražotājs",
+  "setup.model": "Modelis",
+  "setup.revision": "Aparātprogrammatūra",
+  "setup.imei": "IMEI",
+  "setup.save": "Saglabāt un pārstartēt",
+  "setup.saving": "Saglabā…",
+  "setup.saved": "Saglabāts. Serviss pārstartējas…",
+  "setup.saving_hint": "Pēc dažām sekundēm lapa atjaunosies automātiski.",
+  "setup.save_failed": "Neizdevās saglabāt"
 }

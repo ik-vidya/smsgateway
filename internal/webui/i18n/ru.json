@@ -8,6 +8,7 @@
   "nav.inbox": "Входящие",
   "nav.outbox": "Исходящие",
   "nav.logs": "Логи",
+  "nav.setup": "Настройка",
   "nav.lang": "Язык",
 
   "dashboard.title": "Панель управления",
@@ -77,5 +78,22 @@
   "logs.level.warn": "Warn",
   "logs.level.error": "Error",
   "logs.empty": "Ждём записи лога…",
-  "logs.hint": "Живой поток из /logs/stream"
+  "logs.hint": "Живой поток из /logs/stream",
+
+  "setup.title": "Настройка модема",
+  "setup.intro": "Подключите модем к USB-порту. Он появится в списке ниже. Нажмите «Проверить», затем «Сохранить и перезапустить».",
+  "setup.current": "Текущий порт",
+  "setup.ports": "Обнаруженные порты",
+  "setup.waiting": "Ожидание подключения модема…",
+  "setup.probe": "Проверить",
+  "setup.probing": "Проверка…",
+  "setup.manufacturer": "Производитель",
+  "setup.model": "Модель",
+  "setup.revision": "Прошивка",
+  "setup.imei": "IMEI",
+  "setup.save": "Сохранить и перезапустить",
+  "setup.saving": "Сохранение…",
+  "setup.saved": "Сохранено. Сервис перезапускается…",
+  "setup.saving_hint": "Через несколько секунд страница обновится автоматически.",
+  "setup.save_failed": "Не удалось сохранить"
 }

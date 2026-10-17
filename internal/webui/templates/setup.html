@@ -1,0 +1,39 @@
+{{ define "content" -}}
+<h1>{{ T . "setup.title" }}</h1>
+
+<div class="alert alert-info">
+    {{ T . "setup.intro" }}
+</div>
+
+{{ if .CurrentPort }}
+<div class="alert alert-secondary">
+    {{ T . "setup.current" }}: <code>{{ .CurrentPort }}</code>
+    {{ if .EnvPath }}<span class="text-muted">({{ .EnvPath }})</span>{{ end }}
+</div>
+{{ end }}
+
+<div class="card mb-3">
+    <div class="card-header">{{ T . "setup.ports" }}</div>
+    <div class="card-body">
+        <div id="setup-ports-empty" class="text-muted small">
+            {{ T . "setup.waiting" }}
+        </div>
+        <div id="setup-ports-list" class="d-none"
+             data-probe="{{ T . "setup.probe" }}"
+             data-probing="{{ T . "setup.probing" }}"
+             data-manufacturer="{{ T . "setup.manufacturer" }}"
+             data-model="{{ T . "setup.model" }}"
+             data-revision="{{ T . "setup.revision" }}"
+             data-imei="{{ T . "setup.imei" }}"
+             data-save="{{ T . "setup.save" }}"
+             data-saving="{{ T . "setup.saving" }}"
+             data-saving-hint="{{ T . "setup.saving_hint" }}"
+             data-saved="{{ T . "setup.saved" }}"
+             data-save-failed="{{ T . "setup.save_failed" }}">
+            <ul class="list-unstyled mb-0" id="setup-ports-items"></ul>
+        </div>
+    </div>
+</div>
+
+<div id="setup-result" class="d-none"></div>
+{{- end }}

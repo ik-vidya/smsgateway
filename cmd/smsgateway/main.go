@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sync"
 	"syscall"
 	"time"
 
@@ -160,8 +161,6 @@ func runService(_ *cobra.Command, _ []string) error {
 		return err
 	}
 
-	// In-memory buffer для страницы /logs (SSE). Создаётся всегда,
-	// даже если webui выключен — стоимость минимальная.
 	logBuffer := logging.NewBuffer(1000)
 
 	logger, err := logging.NewWithBuffer(cfg.LogLevel, cfg.LogFormat, logBuffer)
@@ -169,8 +168,38 @@ func runService(_ *cobra.Command, _ []string) error {
 		return err
 	}
 
-	// --- Notifier (Telegram или Noop) ---
-	var notifier notify.Notifier = notify.Noop{}
+	// Ресурсы, которые надо закрыть при выходе и при reload.
+	// cleanupOnce гарантирует, что они закроются ровно один раз,
+	// независимо от того, штатный это выход или syscall.Exec.
+	var (
+		cleanupOnce sync.Once
+		notifier    notify.Notifier
+		store       *storage.Store
+		realModem   *modem.Modem
+	)
+	cleanup := func() {
+		cleanupOnce.Do(func() {
+			if notifier != nil {
+				if cerr := notifier.Close(); cerr != nil {
+					logger.Error("закрытие notifier", "err", cerr)
+				}
+			}
+			if store != nil {
+				if cerr := store.Close(); cerr != nil {
+					logger.Error("закрытие БД", "err", cerr)
+				}
+			}
+			if realModem != nil {
+				if cerr := realModem.Close(); cerr != nil {
+					logger.Error("закрытие модема", "err", cerr)
+				}
+			}
+		})
+	}
+	defer cleanup()
+
+	// Notifier (Telegram или Noop).
+	notifier = notify.Noop{}
 	if cfg.TelegramBotToken != "" && cfg.TelegramChatID != "" {
 		tg, err := notify.NewTelegram(notify.TelegramConfig{
 			BotToken: cfg.TelegramBotToken,
@@ -180,16 +209,12 @@ func runService(_ *cobra.Command, _ []string) error {
 		if err != nil {
 			logger.Error("не удалось создать Telegram-нотификатор",
 				"err", err)
+			notifier = notify.Noop{}
 		} else {
 			notifier = tg
 			logger.Info("Telegram-нотификатор активен")
 		}
 	}
-	defer func() {
-		if cerr := notifier.Close(); cerr != nil {
-			logger.Error("закрытие notifier", "err", cerr)
-		}
-	}()
 
 	logger.Info("запуск smsgateway",
 		"version", version,
@@ -204,22 +229,22 @@ func runService(_ *cobra.Command, _ []string) error {
 		syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
-	// --- Инициализация БД ---
+	// SIGHUP → перечитать .env и перезапустить процесс через exec.
+	reloadCh := make(chan os.Signal, 1)
+	signal.Notify(reloadCh, syscall.SIGHUP)
+	defer signal.Stop(reloadCh)
+
+	// БД.
 	if err := ensureDir(cfg.DBPath); err != nil {
 		notifier.Notify(ctx, notify.LevelCritical, err)
 		return err
 	}
-	store, err := storage.Open(ctx, cfg.DBPath)
+	store, err = storage.Open(ctx, cfg.DBPath)
 	if err != nil {
 		err = fmt.Errorf("открытие БД: %w", err)
 		notifier.Notify(ctx, notify.LevelCritical, err)
 		return err
 	}
-	defer func() {
-		if cerr := store.Close(); cerr != nil {
-			logger.Error("закрытие БД", "err", cerr)
-		}
-	}()
 	logger.Info("БД готова", "db_path", cfg.DBPath)
 
 	retentionPolicy := storage.RetentionPolicy{
@@ -227,11 +252,8 @@ func runService(_ *cobra.Command, _ []string) error {
 	}
 	go store.RunRetention(ctx, retentionPolicy, logger)
 
-	// --- Модем или режим без модема ---
-	var (
-		serviceModem service.Modem // для service
-		realModem    *modem.Modem  // nil в режиме без модема
-	)
+	// Модем или режим без модема.
+	var serviceModem service.Modem
 	if cfg.SerialPort == "" || cfg.SerialPort == "none" {
 		logger.Warn("модем не сконфигурирован (SERIAL_PORT пуст) — режим без модема")
 		serviceModem = nopModem{}
@@ -262,21 +284,16 @@ func runService(_ *cobra.Command, _ []string) error {
 			notifier.Notify(ctx, notify.LevelCritical, err)
 			return err
 		}
-		defer func() {
-			if cerr := m.Close(); cerr != nil {
-				logger.Error("закрытие модема", "err", cerr)
-			}
-		}()
+		realModem = m
 
 		if cfg.ModemPIN != "" {
 			m.SetPIN(cfg.ModemPIN)
 		}
 
 		serviceModem = m
-		realModem = m
 	}
 
-	// --- Gammu Manager (опционально) ---
+	// Gammu Manager (опционально).
 	var gammuMgr *gammu.Manager
 	if cfg.GammuEnabled() {
 		inbox, err := gammu.NewInboxWriter(
@@ -321,7 +338,7 @@ func runService(_ *cobra.Command, _ []string) error {
 		)
 	}
 
-	// --- Сервис ---
+	// Сервис.
 	svc := service.New(serviceModem, store, logger, service.Config{
 		DeleteAfterRead: cfg.SMSDeleteAfterRead,
 		SelfNumber:      cfg.SelfNumber,
@@ -335,18 +352,19 @@ func runService(_ *cobra.Command, _ []string) error {
 		svcErr <- svc.Run(ctx)
 	}()
 
-	// --- HTTP API ---
+	// HTTP API.
 	apiServer := api.New(cfg, store, svc, notifier, logger)
 	serverErr := make(chan error, 1)
 	go func() {
 		serverErr <- apiServer.Start()
 	}()
 
-	// --- Web UI (опционально) ---
+	// Web UI (опционально).
 	var webServer *webui.Server
 	webErr := make(chan error, 1)
 	if cfg.WebUIEnabled {
-		ws, err := webui.New(cfg, store, svc, logBuffer, logger, version)
+		ws, err := webui.New(cfg, store, svc, logBuffer, logger,
+			version, flagConfig)
 		if err != nil {
 			err = fmt.Errorf("web ui: %w", err)
 			notifier.Notify(ctx, notify.LevelCritical, err)
@@ -373,6 +391,46 @@ func runService(_ *cobra.Command, _ []string) error {
 				logger.Error("shutdown web ui", "err", err)
 			}
 		}
+	case <-reloadCh:
+		logger.Info("SIGHUP: перезапуск через exec")
+		cancel() // остановить горутины
+		// Дождаться сервиса — он закроет модем, gammu, urcLoop и т.п.
+		select {
+		case err := <-svcErr:
+			if err != nil {
+				logger.Warn("service завершился с ошибкой",
+					"err", err)
+			}
+		case <-time.After(15 * time.Second):
+			logger.Warn("таймаут остановки service")
+		}
+		// Остановить API и Web UI, чтобы освободить порты.
+		shutdownCtx, shutdownCancel := context.WithTimeout(
+			context.Background(), 10*time.Second)
+		if err := apiServer.Shutdown(shutdownCtx); err != nil {
+			logger.Error("shutdown api", "err", err)
+		}
+		if webServer != nil {
+			if err := webServer.Shutdown(shutdownCtx); err != nil {
+				logger.Error("shutdown web ui", "err", err)
+			}
+		}
+		shutdownCancel()
+
+		// Закрыть ресурсы до exec (defer'ы не сработают).
+		cleanup()
+
+		exe, err := os.Executable()
+		if err != nil {
+			exe = "/proc/self/exe"
+		}
+		logger.Info("exec", "exe", exe, "args", os.Args)
+		if err := syscall.Exec(exe, os.Args, os.Environ()); err != nil {
+			logger.Error("syscall.Exec", "err", err)
+			return fmt.Errorf("syscall.Exec: %w", err)
+		}
+		// Сюда не попадём.
+		return nil
 	case err := <-serverErr:
 		if err != nil {
 			notifier.Notify(ctx, notify.LevelCritical, err)

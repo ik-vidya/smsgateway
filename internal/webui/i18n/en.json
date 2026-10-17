@@ -8,6 +8,7 @@
   "nav.inbox": "Inbox",
   "nav.outbox": "Outbox",
   "nav.logs": "Logs",
+  "nav.setup": "Setup",
   "nav.lang": "Language",
 
   "dashboard.title": "Dashboard",
@@ -77,5 +78,22 @@
   "logs.level.warn": "Warn",
   "logs.level.error": "Error",
   "logs.empty": "Waiting for log entries…",
-  "logs.hint": "Live stream from /logs/stream"
+  "logs.hint": "Live stream from /logs/stream",
+
+  "setup.title": "Modem setup",
+  "setup.intro": "Plug the modem into a USB port. It will appear in the list below. Click Check to verify that it responds to AT commands, then Save & restart to apply.",
+  "setup.current": "Current port",
+  "setup.ports": "Detected ports",
+  "setup.waiting": "Waiting for a modem to be plugged in…",
+  "setup.probe": "Check",
+  "setup.probing": "Checking…",
+  "setup.manufacturer": "Manufacturer",
+  "setup.model": "Model",
+  "setup.revision": "Firmware",
+  "setup.imei": "IMEI",
+  "setup.save": "Save & restart",
+  "setup.saving": "Saving…",
+  "setup.saved": "Saved. Service is restarting…",
+  "setup.saving_hint": "Page will reload automatically in a few seconds.",
+  "setup.save_failed": "Save failed"
 }

@@ -18,6 +18,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/nicksnyder/go-i18n/v2/i18n"
@@ -42,19 +43,24 @@ type Server struct {
 	logs    *logging.Buffer
 	logger  *slog.Logger
 	version string
+	envPath string
 
-	bundle    *i18n.Bundle
-	templates map[string]*template.Template
+	bundle      *i18n.Bundle
+	templates   map[string]*template.Template
+	portWatcher *PortWatcher
+
+	probeMu   sync.Mutex
+	lastProbe time.Time
 
 	http *http.Server
 }
 
 // New создаёт сервер.
 //
-// logs может быть nil — тогда страница /logs покажет предупреждение,
-// а /logs/stream вернёт 503.
+// envPath — путь к .env (нужен странице /setup для сохранения
+// SERIAL_PORT). Может быть пустым — тогда save откажет.
 func New(cfg *config.Config, store *storage.Store, svc *service.Service,
-	logs *logging.Buffer, logger *slog.Logger, version string,
+	logs *logging.Buffer, logger *slog.Logger, version, envPath string,
 ) (*Server, error) {
 
 	if logger == nil {
@@ -84,14 +90,16 @@ func New(cfg *config.Config, store *storage.Store, svc *service.Service,
 	}
 
 	s := &Server{
-		cfg:       cfg,
-		store:     store,
-		svc:       svc,
-		logs:      logs,
-		logger:    logger,
-		version:   version,
-		bundle:    bundle,
-		templates: tmpls,
+		cfg:         cfg,
+		store:       store,
+		svc:         svc,
+		logs:        logs,
+		logger:      logger,
+		version:     version,
+		envPath:     envPath,
+		bundle:      bundle,
+		templates:   tmpls,
+		portWatcher: NewPortWatcher(time.Second),
 	}
 
 	s.http = &http.Server{
@@ -99,22 +107,23 @@ func New(cfg *config.Config, store *storage.Store, svc *service.Service,
 		Handler:           s.routes(),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
-		// Для SSE WriteTimeout должен быть больше или равен
-		// интервалу keepalive (15s). Оставляем 0 — таймаут не
-		// ставим: SSE-стримы живут дольше, чем обычные запросы.
-		WriteTimeout: 0,
-		IdleTimeout:  60 * time.Second,
+		WriteTimeout:      0, // SSE: /logs/stream и /setup/ports/stream
+		IdleTimeout:       60 * time.Second,
 	}
 	return s, nil
 }
 
-// Start запускает сервер и блокируется до Shutdown или ошибки.
+// Start запускает сервер и port-watcher.
 func (s *Server) Start() error {
 	ln, err := net.Listen("tcp", s.cfg.WebUIAddr)
 	if err != nil {
 		return fmt.Errorf("webui: listen %s: %w", s.cfg.WebUIAddr, err)
 	}
 	s.logger.Info("Web UI слушает", "addr", ln.Addr().String())
+
+	stop := make(chan struct{})
+	go s.portWatcher.Run(stop)
+	s.http.RegisterOnShutdown(func() { close(stop) })
 
 	err = s.http.Serve(ln)
 	if errors.Is(err, http.ErrServerClosed) {
@@ -140,6 +149,10 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /compose", s.handleComposeSubmit)
 	mux.HandleFunc("GET /logs", s.handleLogs)
 	mux.HandleFunc("GET /logs/stream", s.handleLogsStream)
+	mux.HandleFunc("GET /setup", s.handleSetup)
+	mux.HandleFunc("GET /setup/ports/stream", s.handleSetupPortsStream)
+	mux.HandleFunc("POST /setup/probe", s.handleSetupProbe)
+	mux.HandleFunc("POST /setup/save", s.handleSetupSave)
 	mux.HandleFunc("GET /lang/{code}", s.handleLangSet)
 
 	staticHandler := http.StripPrefix("/static/",
@@ -149,14 +162,13 @@ func (s *Server) routes() http.Handler {
 	return withSecurityHeaders(withCSRF(mux))
 }
 
-// pageFiles сопоставляет ключ страницы имени файла
-// templates/<file>.html.
 var pageFiles = map[string]string{
 	"dashboard": "dashboard",
 	"compose":   "compose",
 	"inbox":     "messages",
 	"outbox":    "messages",
 	"logs":      "logs",
+	"setup":     "setup",
 }
 
 // buildTemplates собирает по отдельному *template.Template на
