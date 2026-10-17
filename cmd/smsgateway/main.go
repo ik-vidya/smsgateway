@@ -73,6 +73,7 @@ func init() {
 		cmdGammuOutbox(),
 		cmdConvertGammuConfig(),
 		cmdDetectModem(),
+		cmdProbe(),
 	)
 }
 

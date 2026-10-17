@@ -86,7 +86,7 @@ error под `GAMMU_ROOT`. Форматы имён IN и все три форм�
 
 ### CLI (`cmd/smsgateway`)
 
-Команды: `version`, `migrate`, `list-ports`, `detect-modem`
+Команды: `version`, `migrate`, `list-ports`, `detect-modem`, `probe`
 (`--write-config` правит `.env` in-place), `gammu-outbox`,
 `convert-gammu-config`, сервис. Режим без модема
 (`SERIAL_PORT=none`). Telegram-нотификатор создаётся
@@ -154,12 +154,9 @@ pub/sub. `NewWithBuffer` создаёт `slog.Handler`, который пише�
 
 ## Другие запланированные задачи
 
-1. Web UI (htmx 4 + Bootstrap 5.2 + i18n ru/lv/en + OIDC).
-   Включая Setup wizard (udev-подключение модема по кнопке).
-2. Профили `quectel`, `telit`.
-3. Команда `probe` для автогенерации профилей.
-
----
+1. OIDC-авторизация для Web UI (B4).
+2. Отладка с реальным SIM800L: питание, прошивка, `sim800ctl`-фиксы
+   (таймаут `AT+COPS=?` = 180с, UART-чтение).
 
 ## Известные ограничения
 
