@@ -17,6 +17,20 @@ func mustWriter(t *testing.T, dir, format string) *InboxWriter {
 	return w
 }
 
+// hasKeyValue проверяет, что в теле файла нет Key = Value
+// (inbox должен быть plain text, как у gammu-smsd).
+func hasKeyValue(body string) (string, bool) {
+	for _, key := range []string{
+		"SMSC =", "Number =", "Text =", "TextDecoded =",
+		"Coding =", "UDH =", "Class =", "Sent =", "Received =",
+	} {
+		if strings.Contains(body, key) {
+			return key, true
+		}
+	}
+	return "", false
+}
+
 func TestNewInboxWriterErrors(t *testing.T) {
 	if _, err := NewInboxWriter("", "utf8", nil); err == nil {
 		t.Error("ожидалась ошибка для пустого dir")
@@ -51,6 +65,8 @@ func TestInboxWriterFormatNormalization(t *testing.T) {
 	}
 }
 
+// TestWriteInboxBasicUTF8 — тело файла это plain text,
+// метаданные — только в имени.
 func TestWriteInboxBasicUTF8(t *testing.T) {
 	dir := t.TempDir()
 	w := mustWriter(t, dir, "utf8")
@@ -65,32 +81,25 @@ func TestWriteInboxBasicUTF8(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Write: %v", err)
 	}
+
+	// Имя файла содержит все метаданные.
 	if filepath.Base(full) != "IN20261015_120034_00_+37121234567_00.txt" {
 		t.Errorf("имя файла: %q", filepath.Base(full))
 	}
 
+	// Тело файла — только текст (UTF-8 без BOM).
 	raw, _ := os.ReadFile(full)
-	body := string(raw)
-
-	// UTF-8 без BOM.
 	if len(raw) >= 3 && raw[0] == 0xEF && raw[1] == 0xBB && raw[2] == 0xBF {
 		t.Error("UTF-8 BOM не ожидался")
 	}
-	for _, want := range []string{
-		`Number = "+37121234567"`,
-		`TextDecoded = "Привет"`,
-		`Coding = "Unicode_No_Compression"`,
-		`Received = "2026-10-15 12:00:34"`,
-	} {
-		if !strings.Contains(body, want) {
-			t.Errorf("нет строки %q в:\n%s", want, body)
-		}
+	if string(raw) != "Привет" {
+		t.Errorf("тело: %q, ожидалось %q", raw, "Привет")
 	}
-	if strings.Contains(body, "SMSC =") {
-		t.Error("SMSC не должен писаться при пустом значении")
-	}
-	if strings.Contains(body, "UDH =") {
-		t.Error("UDH не должен писаться без multipart")
+
+	// Не должно быть Key = Value.
+	if key, ok := hasKeyValue(string(raw)); ok {
+		t.Errorf("тело содержит %q (должно быть plain text):\n%s",
+			key, raw)
 	}
 }
 
@@ -103,7 +112,6 @@ func TestWriteInboxStandardEqualsUTF8(t *testing.T) {
 	if err != nil {
 		t.Fatalf("utf8: %v", err)
 	}
-	// serial для того же timestamp будет 1 (0 уже занят).
 	wStd := mustWriter(t, dir, "standard")
 	p2, err := wStd.Write(InboxMessage{Peer: "+371", Text: "x", Received: ts})
 	if err != nil {
@@ -117,6 +125,8 @@ func TestWriteInboxStandardEqualsUTF8(t *testing.T) {
 	}
 }
 
+// TestWriteInboxUnicode — тело в UTF-16LE с BOM, но всё ещё
+// plain text (без Key = Value).
 func TestWriteInboxUnicode(t *testing.T) {
 	dir := t.TempDir()
 	w := mustWriter(t, dir, "unicode")
@@ -137,17 +147,24 @@ func TestWriteInboxUnicode(t *testing.T) {
 		t.Fatalf("нет BOM UTF-16LE, первые байты: %x", raw[:4])
 	}
 
-	// Roundtrip через DecodeText.
+	// Roundtrip через DecodeText: тело — это просто текст.
 	content, err := DecodeText(raw)
 	if err != nil {
 		t.Fatalf("DecodeText: %v", err)
 	}
-	if !strings.Contains(content, `TextDecoded = "Привет"`) {
-		t.Errorf("после декодирования нет строки с текстом:\n%s", content)
+	if content != "Привет" {
+		t.Errorf("после декодирования: %q, ожидалось %q",
+			content, "Привет")
+	}
+	if key, ok := hasKeyValue(content); ok {
+		t.Errorf("тело содержит %q (должно быть plain text):\n%s",
+			key, content)
 	}
 }
 
-func TestWriteInboxMultipartUDH(t *testing.T) {
+// TestWriteInboxMultipart — sequence в имени файла, UDH в теле
+// НЕ пишется (gammu-smsd так не делает).
+func TestWriteInboxMultipart(t *testing.T) {
 	dir := t.TempDir()
 	w := mustWriter(t, dir, "utf8")
 	ts := time.Date(2026, 10, 15, 12, 0, 34, 0, time.Local)
@@ -166,16 +183,17 @@ func TestWriteInboxMultipartUDH(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Write: %v", err)
 	}
+	// sequence в имени файла.
 	if !strings.HasSuffix(full, "_02.txt") {
 		t.Errorf("sequence не в имени: %q", full)
 	}
+	// Тело — plain text, без UDH.
 	raw, _ := os.ReadFile(full)
-	body := string(raw)
-	if !strings.Contains(body, `UDH = "0500032A0302"`) {
-		t.Errorf("UDH неверный:\n%s", body)
+	if string(raw) != "part 2" {
+		t.Errorf("тело: %q", raw)
 	}
-	if !strings.Contains(body, `Coding = "Default_No_Compression"`) {
-		t.Errorf("Coding для GSM-7 неверный:\n%s", body)
+	if strings.Contains(string(raw), "UDH") {
+		t.Errorf("UDH не должен быть в теле:\n%s", raw)
 	}
 }
 
@@ -211,7 +229,6 @@ func TestWriteInboxRespectsExternalFile(t *testing.T) {
 	dir := t.TempDir()
 	ts := time.Date(2026, 10, 15, 12, 0, 34, 0, time.Local)
 
-	// Занять _00 снаружи (не через writer).
 	busy := filepath.Join(dir, "IN20261015_120034_00_+371_00.txt")
 	if err := os.WriteFile(busy, []byte("occupied"), 0o644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
@@ -227,6 +244,9 @@ func TestWriteInboxRespectsExternalFile(t *testing.T) {
 	}
 }
 
+// TestWriteInboxRoundtripParse — WriteInbox → ParseFile.
+// Тело — plain text, значит ParseFile использует fallback
+// и берёт всё содержимое как m.Text.
 func TestWriteInboxRoundtripParse(t *testing.T) {
 	dir := t.TempDir()
 	w := mustWriter(t, dir, "utf8")
@@ -252,18 +272,30 @@ func TestWriteInboxRoundtripParse(t *testing.T) {
 		t.Fatalf("ParseFile: %v", err)
 	}
 	text, src := m.EffectiveText()
-	if text != "Привет, мир!" || src != "text_decoded" {
+	if text != "Привет, мир!" || src != "plain" {
 		t.Errorf("roundtrip: text=%q src=%q", text, src)
 	}
-	if m.Number != "+37121234567" {
-		t.Errorf("Number=%q", m.Number)
+	// Number из тела не восстанавливается (он в имени файла).
+	if m.Number != "" {
+		t.Errorf("Number=%q, ожидалось пусто (адресат в имени файла)",
+			m.Number)
 	}
-	if !m.Received.Equal(ts) {
-		t.Errorf("Received=%v, ожидалось %v", m.Received, ts)
+	// Из имени файла Number извлекается через ParseIncomingFileName.
+	fn, err := ParseIncomingFileName(filepath.Base(full))
+	if err != nil {
+		t.Fatalf("ParseIncomingFileName: %v", err)
+	}
+	if fn.Sender != "+37121234567" {
+		t.Errorf("Sender из имени: %q", fn.Sender)
+	}
+	if !fn.Time.Equal(ts) {
+		t.Errorf("Time из имени: %v, ожидалось %v", fn.Time, ts)
 	}
 }
 
-func TestWriteInboxQuoteInsideText(t *testing.T) {
+// TestWriteInboxQuotesInText — кавычки в тексте сохраняются
+// как есть (plain text, без escaping).
+func TestWriteInboxQuotesInText(t *testing.T) {
 	dir := t.TempDir()
 	w := mustWriter(t, dir, "utf8")
 	ts := time.Date(2026, 10, 15, 12, 0, 34, 0, time.Local)
@@ -277,32 +309,20 @@ func TestWriteInboxQuoteInsideText(t *testing.T) {
 		t.Fatalf("Write: %v", err)
 	}
 	raw, _ := os.ReadFile(full)
-	body := string(raw)
-
-	// Внутренние кавычки заменены на одинарные — файл остался
-	// структурно валидным (значение обёрнуто в двойные кавычки).
-	if !strings.Contains(body, `TextDecoded = "say 'hi'"`) {
-		t.Errorf("кавычки не нормализованы:\n%s", body)
-	}
-
-	// Парсер снова прочитает.
-	m, _ := ParseFile(body)
-	if m.TextDecoded != `say 'hi'` {
-		t.Errorf("после парсинга: %q", m.TextDecoded)
+	if string(raw) != `say "hi"` {
+		t.Errorf("тело: %q, ожидалось %q", raw, `say "hi"`)
 	}
 }
 
 func TestWriteInboxEmptyPeer(t *testing.T) {
 	dir := t.TempDir()
 	w := mustWriter(t, dir, "utf8")
-
 	if _, err := w.Write(InboxMessage{Text: "x"}); err == nil {
 		t.Fatal("ожидалась ошибка для пустого peer")
 	}
 }
 
 func TestWriteInboxEmptyTextOK(t *testing.T) {
-	// Пустой текст — валидный сценарий (некоторые SMS пусты).
 	dir := t.TempDir()
 	w := mustWriter(t, dir, "utf8")
 	ts := time.Date(2026, 10, 15, 12, 0, 34, 0, time.Local)
@@ -312,12 +332,15 @@ func TestWriteInboxEmptyTextOK(t *testing.T) {
 		t.Fatalf("Write: %v", err)
 	}
 	raw, _ := os.ReadFile(full)
-	if !strings.Contains(string(raw), `TextDecoded = ""`) {
-		t.Errorf("ожидалась пустая TextDecoded:\n%s", raw)
+	// Пустой текст — пустой файл.
+	if len(raw) != 0 {
+		t.Errorf("тело: %q, ожидалось пусто", raw)
 	}
 }
 
-func TestWriteInboxSMSC(t *testing.T) {
+// TestWriteInboxSMSCNotInBody — SMSC в теле не пишется
+// (gammu-smsd так не делает).
+func TestWriteInboxSMSCNotInBody(t *testing.T) {
 	dir := t.TempDir()
 	w := mustWriter(t, dir, "utf8")
 	ts := time.Date(2026, 10, 15, 12, 0, 34, 0, time.Local)
@@ -332,7 +355,10 @@ func TestWriteInboxSMSC(t *testing.T) {
 		t.Fatalf("Write: %v", err)
 	}
 	raw, _ := os.ReadFile(full)
-	if !strings.Contains(string(raw), `SMSC = "+3725509911"`) {
-		t.Errorf("SMSC не записан:\n%s", raw)
+	if strings.Contains(string(raw), "SMSC") {
+		t.Errorf("SMSC не должен быть в теле:\n%s", raw)
+	}
+	if string(raw) != "x" {
+		t.Errorf("тело: %q, ожидалось %q", raw, "x")
 	}
 }

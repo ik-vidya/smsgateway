@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/ik-vidya/smsgateway/internal/gammu"
 	"github.com/ik-vidya/smsgateway/internal/modem"
@@ -98,8 +99,29 @@ func (a *StorageOutboxStore) MarkOutboxSending(ctx context.Context, id int64) er
 }
 
 // MarkOutboxSent: sending → sent, с сохранением reference.
+//
+// Дополнительно резервирует reference в pending_references —
+// чтобы delivery report от этого сообщения можно было связать
+// с messages. Регулярный sendLoop делает это в
+// service.sendOne, но gammu-путь идёт другим маршрутом и без
+// этого шага HandleDeliveryReport не находит сообщение по ref
+// (warn "reference занят" в логе).
+//
+// Best-effort: если reservation не удался (например, ref уже
+// занят другим сообщением, 8-битный ref — 256 вариантов),
+// логируем warning и продолжаем. Сообщение уже отправлено,
+// messages.reference уже установлен.
 func (a *StorageOutboxStore) MarkOutboxSent(ctx context.Context, id, ref int64) error {
-	return a.store.MarkSent(ctx, id, ref)
+	if err := a.store.MarkSent(ctx, id, ref); err != nil {
+		return err
+	}
+	const refTTL = time.Hour
+	if err := a.store.ReserveReference(ctx, ref, id, refTTL); err != nil {
+		slog.Default().Warn(
+			"gammu: не удалось зарезервировать reference для DR",
+			"ref", ref, "message_id", id, "err", err)
+	}
+	return nil
 }
 
 // MarkOutboxFailed: любой нетерминальный → failed.

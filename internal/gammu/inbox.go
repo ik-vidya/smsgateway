@@ -176,21 +176,19 @@ func (w *InboxWriter) marshal(msg InboxMessage) ([]byte, error) {
 // Порядок полей совпадает с тем, что пишет gammu-smsd, чтобы
 // файлы были взаимозаменяемы. Пустые поля опускаются.
 func buildInboxBody(msg InboxMessage) string {
-	var b strings.Builder
-
-	if msg.SMSC != "" {
-		fmt.Fprintf(&b, "SMSC = %s\n", quote(msg.SMSC))
-	}
-	fmt.Fprintf(&b, "Number = %s\n", quote(msg.Peer))
-	fmt.Fprintf(&b, "TextDecoded = %s\n", quote(msg.Text))
-	fmt.Fprintf(&b, "Coding = %s\n", quote(codingForEncoding(msg.Encoding)))
-	if msg.Multipart != nil {
-		fmt.Fprintf(&b, "UDH = %s\n", quote(udhHex(msg.Multipart)))
-	}
-	fmt.Fprintf(&b, "Received = %s\n",
-		quote(msg.Received.Local().Format("2006-01-02 15:04:05")))
-
-	return b.String()
+	// gammu-smsd с InboxFormat = standard/unicode пишет ТОЛЬКО
+	// тело сообщения. Все метаданные (sender, timestamp,
+	// sequence) — в имени файла:
+	//
+	//   IN<YYYYMMDD>_<HHMMSS>_<serial>_<sender>_<sequence>.<ext>
+	//
+	// Это делает inbox-файлы совместимыми с внешними читателями
+	// (rssmspool, старые gammu-smsd).
+	//
+	// Полный metadata-формат (SMSC, Coding, UDH, Class) — это
+	// InboxFormat = detail (SMS Backup XML), который мы не
+	// поддерживаем (NewInboxWriter вернёт ошибку на detail).
+	return msg.Text
 }
 
 // quote оборачивает значение в двойные кавычки.
