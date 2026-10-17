@@ -42,11 +42,74 @@ Authorization: Bearer <key>
 
 ### `GET /healthz`
 
-Без авторизации. Проверка живучести.
+Без авторизации. Простой healthcheck: «процесс жив».
+Возвращает 200 всегда, если процесс отвечает на HTTP.
+Не проверяет БД или модем.
 
 ```json
 {"status": "ok"}
 ```
+
+### `GET /readyz`
+
+Без авторизации. Расширенный healthcheck: «сервис готов
+обслуживать запросы». Для healthcheck-проб docker, k8s,
+reverse-proxy.
+
+Проверяет:
+- **БД** — критично. Недоступна → `503 not_ready`;
+- **модем** — информационно. Если сконфигурирован, но не
+  зарегистрирован в сети, это `warnings` (не `503`): SMS
+  встают в очередь и уйдут, когда появится сеть.
+
+**Ответ `200 OK`:**
+
+```json
+{
+  "status": "ready",
+  "checks": {
+    "database": {"ok": true}
+  },
+  "warnings": []
+}
+```
+
+Или с предупреждениями (модем не сконфигурирован):
+
+```json
+{
+  "status": "ready",
+  "checks": {
+    "database": {"ok": true}
+  },
+  "warnings": ["modem not configured"]
+}
+```
+
+Или модем сконфигурирован, но не в сети:
+
+```json
+{
+  "status": "ready",
+  "checks": {
+    "database": {"ok": true}
+  },
+  "warnings": ["modem configured but not registered in network"]
+}
+```
+
+**Ответ `503 Service Unavailable`:**
+
+```json
+{
+  "status": "not_ready",
+  "checks": {
+    "database": {"ok": false, "error": "sql: database is closed"}
+  }
+}
+```
+
+Таймаут проверки БД — 2 секунды.
 
 ### `GET /api/v1/status`
 

@@ -87,6 +87,7 @@ func (s *Server) routes() http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /healthz", s.handleHealthz)
+	mux.HandleFunc("GET /readyz", s.handleReadyz)
 
 	protected := http.NewServeMux()
 	protected.HandleFunc("GET /api/v1/status", s.handleStatus)

@@ -308,3 +308,85 @@ func TestDiagnosticsWithoutService(t *testing.T) {
 func itoa(v int64) string {
 	return strconv.FormatInt(v, 10)
 }
+
+// ==================== /readyz ====================
+
+func TestReadyzHealthy(t *testing.T) {
+	s := newTestServer(t)
+	w := doRequest(t, s, "GET", "/readyz", nil, "")
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d, тело: %s", w.Code, w.Body.String())
+	}
+	var resp readyResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp.Status != "ready" {
+		t.Errorf("status=%q, ожидалось ready", resp.Status)
+	}
+	if c, ok := resp.Checks["database"]; !ok || !c.OK {
+		t.Errorf("checks.database=%v, ожидалось ok=true", c)
+	}
+}
+
+func TestReadyzModemNotConfigured(t *testing.T) {
+	// newTestServer создаёт cfg с SerialPort="none" — это
+	// штатный режим «без модема». /readyz должен вернуть 200
+	// с warnings про неконфигурированный модем.
+	s := newTestServer(t)
+	w := doRequest(t, s, "GET", "/readyz", nil, "")
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d, тело: %s", w.Code, w.Body.String())
+	}
+	var resp readyResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	found := false
+	for _, warn := range resp.Warnings {
+		if strings.Contains(warn, "modem not configured") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("warnings=%v, ожидалось упоминание 'modem not configured'",
+			resp.Warnings)
+	}
+}
+
+func TestReadyzDBUnavailable(t *testing.T) {
+	// Закрываем БД — PingContext должен упасть, /readyz вернёт
+	// 503 not_ready.
+	s := newTestServer(t)
+	if err := s.store.Close(); err != nil {
+		t.Fatalf("store.Close: %v", err)
+	}
+
+	w := doRequest(t, s, "GET", "/readyz", nil, "")
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status=%d, ожидалось 503, тело: %s",
+			w.Code, w.Body.String())
+	}
+	var resp readyResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp.Status != "not_ready" {
+		t.Errorf("status=%q, ожидалось not_ready", resp.Status)
+	}
+	if c, ok := resp.Checks["database"]; !ok || c.OK {
+		t.Errorf("checks.database=%v, ожидалось ok=false", c)
+	}
+}
+
+func TestReadyzNoAuthRequired(t *testing.T) {
+	// /readyz — без авторизации, как /healthz.
+	s := newTestServer(t)
+	w := doRequest(t, s, "GET", "/readyz", nil, "") // без ключа
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d — /readyz не должен требовать авторизацию",
+			w.Code)
+	}
+}

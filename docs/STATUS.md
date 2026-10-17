@@ -103,11 +103,12 @@ graceful shutdown. Middleware: `withAuth` (X-API-Key или
 Bearer, constant-time), `withLogging`, `withRecover`
 (паника → Telegram-алерт).
 
-Эндпоинты: `/healthz`, `/api/v1/status`,
+Эндпоинты: `/healthz` (просто «жив»), `/readyz` (проверка
+БД + предупреждения о модеме), `/api/v1/status`,
 `/api/v1/messages` (CRUD), `/api/v1/test-sms`,
 `/api/v1/diagnostics` (`?raw=1` — сырые AT). Формат ошибок
 `{"error":{"code","message"}}`. Все сообщения через API
-получают `source='api'`. Тестов: 21.
+получают `source='api'`. Тестов: 25.
 
 ### Notify (`internal/notify`)
 

@@ -152,8 +152,24 @@ SERIAL_PORT=/dev/serial/by-id/usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Control
 
 ### `GET /healthz`
 
+Простой healthcheck: «процесс жив». Без авторизации.
+
 ```json
 {"status": "ok"}
+```
+
+### `GET /readyz`
+
+Расширенный healthcheck: проверяет доступность БД (критично,
+`503` при провале) и предупреждает о неготовности модема.
+Без авторизации. Для docker/k8s/reverse-proxy healthcheck.
+
+```json
+{
+  "status": "ready",
+  "checks": {"database": {"ok": true}},
+  "warnings": ["modem configured but not registered in network"]
+}
 ```
 
 ### `GET /api/v1/status`

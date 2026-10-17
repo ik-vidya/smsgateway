@@ -2,6 +2,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,8 +17,78 @@ import (
 const maxBodySize = 64 * 1024
 
 // handleHealthz — GET /healthz.
+//
+// Простой healthcheck: «процесс жив». Без авторизации.
+// Возвращает 200 всегда, если процесс отвечает на HTTP.
+//
+// Для проверки «сервис готов обслуживать запросы» (БД доступна,
+// модем сконфигурирован) — используйте GET /readyz.
 func (s *Server) handleHealthz(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// readyCheck — результат одной проверки в /readyz.
+type readyCheck struct {
+	OK    bool   `json:"ok"`
+	Error string `json:"error,omitempty"`
+}
+
+// readyResponse — тело ответа /readyz.
+type readyResponse struct {
+	Status   string                `json:"status"`
+	Checks   map[string]readyCheck `json:"checks,omitempty"`
+	Warnings []string              `json:"warnings,omitempty"`
+}
+
+// handleReadyz — GET /readyz.
+//
+// Расширенный healthcheck: проверяет доступность БД и, если
+// модем сконфигурирован, его регистрацию в сети.
+//
+// 200 OK: БД доступна. Если модем сконфигурирован, но не
+// зарегистрирован в сети — это warnings (SMS встают в очередь
+// и уйдут, когда сеть появится; это не повод рубить сервис).
+//
+// 503 Service Unavailable: БД недоступна — сервис не может
+// обслуживать запросы.
+//
+// Без авторизации (как /healthz) — для healthcheck-проб
+// docker/k8s/reverse-proxy. Не отдаёт чувствительных данных.
+func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+	defer cancel()
+
+	resp := readyResponse{
+		Status: "ready",
+		Checks: make(map[string]readyCheck),
+	}
+
+	// БД — критично.
+	if err := s.store.DB().PingContext(ctx); err != nil {
+		resp.Status = "not_ready"
+		resp.Checks["database"] = readyCheck{OK: false, Error: err.Error()}
+		writeJSON(w, http.StatusServiceUnavailable, resp)
+		return
+	}
+	resp.Checks["database"] = readyCheck{OK: true}
+
+	// Модем — информационно.
+	//
+	// SERIAL_PORT=none/пусто — самодостаточный признак
+	// «модем не сконфигурирован», warning не зависит от
+	// наличия svc (в тестах svc может быть nil).
+	//
+	// Если модем сконфигурирован — проверяем регистрацию через
+	// svc; без svc состояние неизвестно, без warning.
+	switch {
+	case s.cfg.SerialPort == "" || s.cfg.SerialPort == "none":
+		resp.Warnings = append(resp.Warnings, "modem not configured")
+	case s.svc != nil && !s.svc.Registered():
+		resp.Warnings = append(resp.Warnings,
+			"modem configured but not registered in network")
+	}
+
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // handleStatus — GET /api/v1/status.
