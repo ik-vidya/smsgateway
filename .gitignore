@@ -42,3 +42,6 @@ Thumbs.db
 
 # Temp
 temp/
+
+Makefile
+.gitignore

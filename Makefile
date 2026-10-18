@@ -18,13 +18,13 @@ build: tidy fmt vet
 	CGO_ENABLED=0 go build $(GOFLAGS) -ldflags '$(LDFLAGS)' -o $(BIN_DIR)/$(BINARY) $(PKG)
 
 run: build
-	./$(BIN_DIR)/$(BINARY) -config .env
+	sudo ./$(BIN_DIR)/$(BINARY) --config .env
 
 test:
-	go test ./... -timeout 60s
+	go test ./... --timeout 60s
 
 test-race:
-	go test -race -timeout 120s \
+	go test --race --timeout 120s \
 		./internal/logging/... \
 		./internal/webui/... \
 		./internal/api/... \
@@ -52,7 +52,7 @@ ci: tidy fmt vet
 		echo "gofmt found unformatted files:"; echo "$$UNFORMATTED"; exit 1; \
 	fi
 	@$(MAKE) --no-print-directory vendor-check
-	go test ./... -timeout 60s
+	go test ./... --timeout 60s
 	@$(MAKE) --no-print-directory test-race
 	CGO_ENABLED=0 go build ./...
 
