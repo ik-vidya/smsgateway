@@ -354,3 +354,131 @@ func writeJSONSetup(w http.ResponseWriter, status int, v any) {
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)
 }
+
+// ==================== diagnostics + test-receive ====================
+
+const (
+	// setupDiagTimeout — таймаут GET /setup/diagnostics.
+	// diagnostics.Collect ограничивает бюджет 25s, плюс запас на HTTP.
+	setupDiagTimeout = 30 * time.Second
+
+	// setupTestReceiveTimeout — общий таймаут POST /setup/test-receive.
+	// SendTestSMSWithReceive укладывается в testSMSTimeout (до 120s)
+	// + receiveTimeout (90s). HTTP-сервер имеет WriteTimeout=0.
+	setupTestReceiveTimeout = 180 * time.Second
+
+	// setupTestReceiveWait — сколько ждать входящее SMS.
+	setupTestReceiveWait = 90 * time.Second
+)
+
+// handleSetupDiagnostics — GET /setup/diagnostics.
+//
+// Возвращает diagnostics.Result (JSON). Поле Raw не отдаём:
+// там могут быть IMEI/IMSI/номера, а страница /setup доступна
+// в сети (Web UI слушает 0.0.0.0).
+//
+// Rate limit — 100ms (как у probe). Lock — probeMu (модем может
+// выполнять только одну длинную операцию за раз).
+func (s *Server) handleSetupDiagnostics(w http.ResponseWriter, r *http.Request) {
+	if s.svc == nil {
+		writeJSONSetup(w, http.StatusServiceUnavailable, map[string]any{
+			"error": "service not configured",
+		})
+		return
+	}
+
+	if !s.probeMu.TryLock() {
+		writeJSONSetup(w, http.StatusConflict, map[string]any{
+			"error": "modem is busy (probe or diagnostics already in progress)",
+		})
+		return
+	}
+	defer s.probeMu.Unlock()
+
+	if time.Since(s.lastDiag) < setupProbeMinInterval {
+		writeJSONSetup(w, http.StatusTooManyRequests, map[string]any{
+			"error": "too many requests",
+		})
+		return
+	}
+	s.lastDiag = time.Now()
+
+	ctx, cancel := context.WithTimeout(r.Context(), setupDiagTimeout)
+	defer cancel()
+
+	res, err := s.svc.RunDiagnostics(ctx)
+	if err != nil {
+		s.logger.Warn("webui: setup diagnostics", "err", err)
+		writeJSONSetup(w, http.StatusInternalServerError, map[string]any{
+			"error": err.Error(),
+		})
+		return
+	}
+	res.Raw = nil
+	writeJSONSetup(w, http.StatusOK, res)
+}
+
+// handleSetupTestReceive — POST /setup/test-receive.
+//
+// Отправляет SMS на SELF_NUMBER с уникальным маркером и ждёт
+// входящее с этим маркером. Если отправка прошла, а приём — нет,
+// возвращает 200 с receive_timed_out=true: не ошибка сервиса,
+// а сигнал о проблеме приёма.
+//
+// Не блокируем probeMu — sendLoop работает асинхронно,
+// SendTestSMSWithReceive только ждёт статуса из БД.
+func (s *Server) handleSetupTestReceive(w http.ResponseWriter, r *http.Request) {
+	if s.cfg.SelfNumber == "" {
+		writeJSONSetup(w, http.StatusBadRequest, map[string]any{
+			"error":       "SELF_NUMBER is not set in .env",
+			"self_number": "",
+		})
+		return
+	}
+	if s.cfg.SerialPort == "" || s.cfg.SerialPort == "none" {
+		writeJSONSetup(w, http.StatusServiceUnavailable, map[string]any{
+			"error": "modem is not configured",
+		})
+		return
+	}
+	if s.svc == nil {
+		writeJSONSetup(w, http.StatusServiceUnavailable, map[string]any{
+			"error": "service not configured",
+		})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), setupTestReceiveTimeout)
+	defer cancel()
+
+	res, err := s.svc.SendTestSMSWithReceive(ctx, setupTestReceiveWait)
+	if err != nil {
+		s.logger.Warn("webui: test-receive", "err", err)
+		writeJSONSetup(w, http.StatusInternalServerError, map[string]any{
+			"error": err.Error(),
+		})
+		return
+	}
+
+	s.logger.Info("webui: test-receive завершён",
+		"marker", res.Marker,
+		"sent_status", res.Sent.Status,
+		"sent_timed_out", res.Sent.TimedOut,
+		"received", res.Received != nil,
+		"receive_timed_out", res.ReceiveTimedOut)
+
+	writeJSONSetup(w, http.StatusOK, map[string]any{
+		"marker": res.Marker,
+		"sent": map[string]any{
+			"id":        res.Sent.ID,
+			"status":    string(res.Sent.Status),
+			"timed_out": res.Sent.TimedOut,
+			"error":     res.Sent.Error,
+			"reference": res.Sent.Reference,
+		},
+		"received":          res.Received,
+		"receive_timed_out": res.ReceiveTimedOut,
+		"receive_error":     res.ReceiveError,
+		"self_number":       s.cfg.SelfNumber,
+	})
+}

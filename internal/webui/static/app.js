@@ -439,3 +439,262 @@
         }
     }
 })();
+
+
+// ==================== setup: diagnostics + test-receive ====================
+
+(function () {
+    'use strict';
+
+    initSetupDiagnostics();
+    initSetupTestReceive();
+
+    function initSetupDiagnostics() {
+        var card = document.getElementById('setup-diag-card');
+        if (!card) return;
+
+        var btn = document.getElementById('setup-diag-btn');
+        var result = document.getElementById('setup-diag-result');
+        if (!btn || !result) return;
+
+        var labels = {
+            refresh: card.dataset.refresh,
+            loading: card.dataset.loading,
+            error: card.dataset.error,
+            manufacturer: card.dataset.manufacturer,
+            model: card.dataset.model,
+            revision: card.dataset.revision,
+            imei: card.dataset.imei,
+            imsi: card.dataset.imsi,
+            iccid: card.dataset.iccid,
+            sim: card.dataset.sim,
+            signal: card.dataset.signal,
+            registration: card.dataset.registration,
+            gprs: card.dataset.gprs,
+            operator: card.dataset.operator,
+            smsc: card.dataset.smsc,
+            storage: card.dataset.storage,
+        };
+
+        btn.addEventListener('click', function () {
+            btn.disabled = true;
+            var orig = btn.textContent;
+            btn.textContent = labels.loading;
+            result.innerHTML = '<span class="text-muted">' +
+                escapeHtml(labels.loading) + '</span>';
+
+            fetch('/setup/diagnostics', { method: 'GET' })
+                .then(function (resp) {
+                    return resp.json().then(function (j) {
+                        return { status: resp.status, body: j };
+                    });
+                })
+                .then(function (r) { render(r.status, r.body); })
+                .catch(function (err) {
+                    result.innerHTML = '<div class="alert alert-danger">' +
+                        escapeHtml(labels.error + ': ' + err) + '</div>';
+                })
+                .finally(function () {
+                    btn.disabled = false;
+                    btn.textContent = orig;
+                });
+        });
+
+        function render(status, body) {
+            if (status !== 200 || (body && body.error)) {
+                var msg = (body && body.error) || 'error';
+                result.innerHTML = '<div class="alert alert-danger">' +
+                    escapeHtml(msg) + '</div>';
+                return;
+            }
+
+            var rows = [];
+            function row(label, value) {
+                if (value === undefined || value === null || value === '') return;
+                rows.push('<tr><th class="text-nowrap small">' +
+                    escapeHtml(label) + '</th><td class="small">' +
+                    escapeHtml(value) + '</td></tr>');
+            }
+
+            row(labels.manufacturer, body.manufacturer);
+            row(labels.model, body.model);
+            row(labels.revision, body.revision);
+            row(labels.imei, body.imei);
+            row(labels.imsi, body.imsi);
+            row(labels.iccid, body.iccid);
+            row(labels.sim, body.sim_status);
+
+            if (body.signal) {
+                var sig = body.signal;
+                var sigText;
+                if (sig.error) {
+                    sigText = labels.error + ': ' + sig.error;
+                    if (sig.cached_rssi) {
+                        sigText += ' (cached: ' + sig.cached_rssi + '/31)';
+                    }
+                } else {
+                    sigText = sig.rssi + '/31, ' + sig.dbm + ' dBm';
+                    if (sig.quality) sigText += ' (' + sig.quality + ')';
+                }
+                row(labels.signal, sigText);
+            }
+
+            if (body.registration) {
+                var reg = body.registration;
+                var regText;
+                if (reg.error) {
+                    regText = labels.error + ': ' + reg.error;
+                    if (reg.cached_text) {
+                        regText += ' (cached: ' + reg.cached_text + ')';
+                    }
+                } else {
+                    regText = reg.text || ('status ' + reg.status);
+                    if (reg.lac) regText += ', LAC ' + reg.lac;
+                    if (reg.cid) regText += ', CID ' + reg.cid;
+                }
+                row(labels.registration, regText);
+            }
+
+            if (body.gprs_registration) {
+                var gprs = body.gprs_registration;
+                var gprsText;
+                if (gprs.error) {
+                    gprsText = labels.error + ': ' + gprs.error;
+                } else {
+                    gprsText = gprs.text || ('status ' + gprs.status);
+                }
+                row(labels.gprs, gprsText);
+            }
+
+            if (body.operator) {
+                var op = body.operator;
+                var opText;
+                if (op.error) opText = labels.error + ': ' + op.error;
+                else if (op.name && op.code) opText = op.name + ' (' + op.code + ')';
+                else opText = op.name || op.code || '';
+                row(labels.operator, opText);
+            }
+
+            row(labels.smsc, body.smsc);
+
+            if (body.storage) {
+                var st = body.storage;
+                var stText;
+                if (st.error) {
+                    stText = labels.error + ': ' + st.error;
+                } else {
+                    stText = st.read + ': ' + st.used + '/' + st.total;
+                    if (st.write && st.write !== st.read) {
+                        stText += ' (write: ' + st.write + ')';
+                    }
+                }
+                row(labels.storage, stText);
+            }
+
+            if (rows.length === 0) {
+                result.innerHTML = '<span class="text-muted">—</span>';
+            } else {
+                result.innerHTML = '<table class="table table-sm mb-0">' +
+                    rows.join('') + '</table>';
+            }
+        }
+    }
+
+    function initSetupTestReceive() {
+        var card = document.getElementById('setup-test-receive-card');
+        if (!card) return;
+
+        var btn = document.getElementById('setup-test-receive-btn');
+        var result = document.getElementById('setup-test-receive-result');
+        if (!btn || !result) return;
+
+        var labels = {
+            start: card.dataset.start,
+            running: card.dataset.running,
+            sent: card.dataset.sent,
+            received: card.dataset.received,
+            success: card.dataset.success,
+            timeout: card.dataset.timeout,
+            notApplicable: card.dataset.notApplicable,
+            error: card.dataset.error,
+        };
+
+        btn.addEventListener('click', function () {
+            btn.disabled = true;
+            var orig = btn.textContent;
+            btn.textContent = labels.running;
+            result.classList.remove('d-none');
+            result.className = 'mt-3 alert alert-secondary';
+            result.innerHTML = '<span class="text-muted">' +
+                escapeHtml(labels.running) + '</span>';
+
+            fetch('/setup/test-receive', { method: 'POST' })
+                .then(function (resp) {
+                    return resp.json().then(function (j) {
+                        return { status: resp.status, body: j };
+                    });
+                })
+                .then(function (r) { render(r.status, r.body); })
+                .catch(function (err) {
+                    result.className = 'mt-3 alert alert-danger';
+                    result.textContent = labels.error + ': ' + err;
+                })
+                .finally(function () {
+                    btn.disabled = false;
+                    btn.textContent = orig;
+                });
+        });
+
+        function render(status, body) {
+            if (status !== 200 || (body && body.error)) {
+                result.className = 'mt-3 alert alert-danger';
+                result.textContent = labels.error + ': ' +
+                    ((body && body.error) || 'error');
+                return;
+            }
+
+            var parts = [];
+
+            var sentStatus = (body.sent && body.sent.status) || '?';
+            var sentText = labels.sent + ': ' + sentStatus;
+            if (body.sent && body.sent.timed_out) sentText += ' (timeout)';
+            if (body.sent && body.sent.error) sentText += ' — ' + body.sent.error;
+            parts.push('<div class="mb-2">' + escapeHtml(sentText) + '</div>');
+
+            var cls;
+            if (body.received) {
+                parts.push('<div class="mb-2">' + escapeHtml(labels.received) +
+                    ': #' + body.received.id + ' ' +
+                    escapeHtml(body.received.text) + '</div>');
+                parts.push('<div class="fw-semibold text-success">&#10003; ' +
+                    escapeHtml(labels.success) + '</div>');
+                cls = 'alert-success';
+            } else if (body.receive_timed_out) {
+                parts.push('<div class="fw-semibold text-warning">' +
+                    escapeHtml(labels.timeout) + '</div>');
+                cls = 'alert-warning';
+            } else if (body.receive_error) {
+                parts.push('<div class="fw-semibold text-danger">' +
+                    escapeHtml(labels.error + ': ' + body.receive_error) +
+                    '</div>');
+                cls = 'alert-danger';
+            } else {
+                parts.push('<div class="text-muted">' +
+                    escapeHtml(labels.notApplicable) + '</div>');
+                cls = 'alert-info';
+            }
+
+            result.className = 'mt-3 alert ' + cls;
+            result.innerHTML = parts.join('');
+        }
+    }
+
+    function escapeHtml(s) {
+        return String(s)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+})();

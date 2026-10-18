@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -759,4 +760,120 @@ func interpretTPST(tpst int) string {
 
 func nullInt64(v int64) sql.NullInt64 {
 	return sql.NullInt64{Int64: v, Valid: true}
+}
+
+// ==================== SendTestSMSWithReceive ====================
+
+// ReceivedSummary — краткая сводка о принятом SMS (для JSON).
+type ReceivedSummary struct {
+	ID        int64     `json:"id"`
+	Peer      string    `json:"peer"`
+	Text      string    `json:"text"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// TestSMSWithReceiveResult — результат «отправка + приём».
+type TestSMSWithReceiveResult struct {
+	Marker          string
+	Sent            TestSMSResult
+	Received        *ReceivedSummary
+	ReceiveTimedOut bool
+	ReceiveError    string
+}
+
+// SendTestSMSWithReceive проверяет сеть в обе стороны:
+//
+//  1. Генерирует уникальный текст с маркером.
+//  2. Отправляет на SELF_NUMBER и ждёт sent/delivered/sent_no_dr
+//     (в пределах s.testSMSTimeout).
+//  3. Опрашивает БД на входящее с тем же маркером (до receiveTimeout).
+//
+// Входящее ищется среди direction=in, peer=SELF_NUMBER, created_at>=start.
+// Тело должно содержать маркер — это отсекает чужие SMS от других
+// отправителей с тем же номером.
+//
+// Возвращает результат даже при частичном успехе: если исходящее
+// ушло, но входящее не пришло — ReceiveTimedOut=true. Ошибка
+// возвращается только при проблемах самой отправки или контекста.
+func (s *Service) SendTestSMSWithReceive(ctx context.Context,
+	receiveTimeout time.Duration) (TestSMSWithReceiveResult, error) {
+
+	if s.selfNumber == "" {
+		return TestSMSWithReceiveResult{}, errors.New(
+			"SELF_NUMBER не задан в конфиге")
+	}
+	if receiveTimeout <= 0 {
+		receiveTimeout = 90 * time.Second
+	}
+
+	now := time.Now().UTC()
+	// Уникальный маркер: timestamp + младшие 6 цифр UnixNano.
+	// При повторных запусках в одну секунду маркеры различаются.
+	marker := fmt.Sprintf("smsgateway selftest %s #%06d",
+		now.Format("20060102-150405"),
+		now.UnixNano()%1000000)
+	start := now
+
+	sent, err := s.SendTestSMS(ctx, marker)
+	if err != nil {
+		return TestSMSWithReceiveResult{Marker: marker, Sent: sent}, err
+	}
+
+	res := TestSMSWithReceiveResult{Marker: marker, Sent: sent}
+
+	// Приём имеет смысл, только если исходящее реально ушло в сеть.
+	// sent_no_dr — статус sent + истёк DR-wait: SMS отправлена,
+	// но DR не пришёл. Приём может работать.
+	switch sent.Status {
+	case storage.StatusSent, storage.StatusDelivered, storage.StatusSentNoDR:
+		// продолжаем
+	default:
+		return res, nil
+	}
+
+	deadline := time.Now().Add(receiveTimeout)
+	tick := time.NewTicker(DefaultTestSMSPollPeriod)
+	defer tick.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			res.ReceiveError = ctx.Err().Error()
+			return res, ctx.Err()
+		case <-tick.C:
+		}
+
+		msgs, _, err := s.store.ListMessages(ctx, storage.Filter{
+			Direction: storage.DirectionIn,
+			Peer:      s.selfNumber,
+			Since:     &start,
+			Limit:     10,
+		})
+		if err != nil {
+			res.ReceiveError = err.Error()
+			return res, nil
+		}
+		for _, m := range msgs {
+			if strings.Contains(m.Text, marker) {
+				res.Received = &ReceivedSummary{
+					ID:        m.ID,
+					Peer:      m.Peer,
+					Text:      m.Text,
+					CreatedAt: m.CreatedAt,
+				}
+				s.logger.Info("service: test-receive OK",
+					"marker", marker,
+					"sent_id", sent.ID,
+					"received_id", m.ID)
+				return res, nil
+			}
+		}
+		if time.Now().After(deadline) {
+			res.ReceiveTimedOut = true
+			s.logger.Warn("service: test-receive timeout",
+				"marker", marker, "sent_id", sent.ID,
+				"timeout", receiveTimeout)
+			return res, nil
+		}
+	}
 }

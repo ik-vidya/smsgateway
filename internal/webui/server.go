@@ -54,6 +54,7 @@ type Server struct {
 
 	probeMu   sync.Mutex
 	lastProbe time.Time
+	lastDiag  time.Time
 
 	http *http.Server
 }
@@ -159,6 +160,8 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /setup/probe", s.handleSetupProbe)
 	mux.HandleFunc("POST /setup/save", s.handleSetupSave)
 	mux.HandleFunc("POST /setup/test", s.handleSetupTest)
+	mux.HandleFunc("GET /setup/diagnostics", s.handleSetupDiagnostics)
+	mux.HandleFunc("POST /setup/test-receive", s.handleSetupTestReceive)
 	mux.HandleFunc("GET /lang/{code}", s.handleLangSet)
 
 	mux.Handle("GET /static/", newStaticHandler())

@@ -590,3 +590,101 @@ func TestRunDiagnostics(t *testing.T) {
 		t.Errorf("Signal.RSSI=%d", r.Signal.RSSI)
 	}
 }
+
+// ==================== SendTestSMSWithReceive ====================
+
+func TestSendTestSMSWithReceive_NoSelfNumber(t *testing.T) {
+	mock := newMockModem()
+	svc, _ := newTestService(t, mock)
+
+	_, err := svc.SendTestSMSWithReceive(context.Background(), time.Second)
+	if err == nil {
+		t.Fatal("ожидалась ошибка при пустом SELF_NUMBER")
+	}
+	if !strings.Contains(err.Error(), "SELF_NUMBER") {
+		t.Errorf("err=%v", err)
+	}
+}
+
+// TestSendTestSMSWithReceive_ReceiveTimeout — исходящее ушло,
+// входящего нет → ReceiveTimedOut=true, ошибки нет.
+func TestSendTestSMSWithReceive_ReceiveTimeout(t *testing.T) {
+	mock := newMockModem()
+	svc, _ := newTestService(t, mock)
+	svc.selfNumber = "+37121234567"
+	svc.sendInterval = 20 * time.Millisecond
+	svc.testSMSTimeout = 300 * time.Millisecond
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	go func() { _ = svc.Run(ctx) }()
+
+	res, err := svc.SendTestSMSWithReceive(ctx, 500*time.Millisecond)
+	if err != nil {
+		t.Fatalf("SendTestSMSWithReceive: %v", err)
+	}
+	if !res.ReceiveTimedOut {
+		t.Errorf("ReceiveTimedOut=false, ожидалось true")
+	}
+	if res.Received != nil {
+		t.Errorf("Received=%+v, ожидалось nil", res.Received)
+	}
+	if res.Marker == "" {
+		t.Error("Marker пуст")
+	}
+}
+
+// TestSendTestSMSWithReceive_OK — эмулируем входящее: как только
+// sendLoop выставит sent, создаём в БД входящее с тем же Text.
+// Метод должен найти его по маркеру.
+func TestSendTestSMSWithReceive_OK(t *testing.T) {
+	mock := newMockModem()
+	mock.sendResult = modem.SendResult{Reference: 42}
+	svc, store := newTestService(t, mock)
+	svc.selfNumber = "+37121234567"
+	svc.sendInterval = 20 * time.Millisecond
+	svc.testSMSTimeout = 500 * time.Millisecond
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	go func() { _ = svc.Run(ctx) }()
+
+	// Симулятор приёма: ждём sent, создаём входящее с тем же Text.
+	go func() {
+		for i := 0; i < 40; i++ {
+			time.Sleep(50 * time.Millisecond)
+			list, _, err := store.ListMessages(context.Background(),
+				storage.Filter{
+					Direction: storage.DirectionOut,
+					Status:    storage.StatusSent,
+					Limit:     1,
+				})
+			if err != nil || len(list) == 0 {
+				continue
+			}
+			_, _ = store.CreateMessage(context.Background(),
+				&storage.Message{
+					Direction: storage.DirectionIn,
+					Status:    storage.StatusReceived,
+					Peer:      "+37121234567",
+					Text:      list[0].Text,
+				})
+			return
+		}
+	}()
+
+	res, err := svc.SendTestSMSWithReceive(ctx, 3*time.Second)
+	if err != nil {
+		t.Fatalf("SendTestSMSWithReceive: %v", err)
+	}
+	if res.ReceiveTimedOut {
+		t.Fatalf("ReceiveTimedOut=true; received=%+v", res.Received)
+	}
+	if res.Received == nil {
+		t.Fatal("Received=nil")
+	}
+	if !strings.Contains(res.Received.Text, res.Marker) {
+		t.Errorf("Received.Text=%q не содержит маркер %q",
+			res.Received.Text, res.Marker)
+	}
+}
