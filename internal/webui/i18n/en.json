@@ -99,7 +99,7 @@
   "nav.lang": "Language",
   "nav.logs": "Logs",
   "nav.outbox": "Outbox",
-  "nav.setup": "Setup",
+  "nav.setup": "Check",
   "setup.current": "Current port",
   "setup.diag.error": "Error",
   "setup.diag.gprs": "GPRS registration",
@@ -153,6 +153,6 @@
   "setup.test_timeout": "Timed out waiting for the delivery report. The SMS may still arrive shortly.",
   "setup.test_title": "Self-test",
   "setup.testing": "Sending…",
-  "setup.title": "Modem setup",
+  "setup.title": "Modem check",
   "setup.waiting": "Waiting for a modem to be plugged in…"
 }

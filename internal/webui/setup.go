@@ -139,6 +139,19 @@ func (s *Server) handleSetupProbe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Порт занят запущенным сервисом. Сервис открыл порт и
+	// непрерывно читает байты. Если probe откроет тот же tty,
+	// AT-команда уйдёт в reader сервиса, а не в probe —
+	// гарантированный таймаут 3s. Подсказываем, что делать
+	// вместо этого: диагностика и тест «отправка + приём» идут
+	// через сервис и работают при занятом порте.
+	if req.Port == s.cfg.SerialPort {
+		writeSetupErr(w, http.StatusConflict,
+			"port is in use by the running service; "+
+				"use diagnostics or send/receive test instead")
+		return
+	}
+
 	ctx, cancel := context.WithTimeout(r.Context(), setupProbeTimeout)
 	defer cancel()
 

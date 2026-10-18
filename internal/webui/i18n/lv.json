@@ -99,7 +99,7 @@
   "nav.lang": "Valoda",
   "nav.logs": "Žurnāli",
   "nav.outbox": "Izejošās",
-  "nav.setup": "Iestatīšana",
+  "nav.setup": "Pārbaude",
   "setup.current": "Pašreizējais ports",
   "setup.diag.error": "Kļūda",
   "setup.diag.gprs": "GPRS reģistrācija",
@@ -153,6 +153,6 @@
   "setup.test_timeout": "Beidzies piegādes statusa gaidīšanas laiks. SMS var pienākt nedaudz vēlāk.",
   "setup.test_title": "Pašpārbaude",
   "setup.testing": "Sūta…",
-  "setup.title": "Modema iestatīšana",
+  "setup.title": "Modema pārbaude",
   "setup.waiting": "Gaidām modema pievienošanu…"
 }

@@ -99,7 +99,7 @@
   "nav.lang": "Язык",
   "nav.logs": "Логи",
   "nav.outbox": "Исходящие",
-  "nav.setup": "Настройка",
+  "nav.setup": "Проверка",
   "setup.current": "Текущий порт",
   "setup.diag.error": "Ошибка",
   "setup.diag.gprs": "GPRS-регистрация",
@@ -153,6 +153,6 @@
   "setup.test_timeout": "Истёк таймаут ожидания статуса доставки. SMS может прийти с задержкой.",
   "setup.test_title": "Самопроверка",
   "setup.testing": "Отправка…",
-  "setup.title": "Настройка модема",
+  "setup.title": "Проверка модема",
   "setup.waiting": "Ожидание подключения модема…"
 }
