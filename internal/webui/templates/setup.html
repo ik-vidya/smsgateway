@@ -30,7 +30,9 @@
              data-saving-hint="{{ T . "setup.saving_hint" }}"
              data-saved="{{ T . "setup.saved" }}"
              data-save-failed="{{ T . "setup.save_failed" }}"
-             data-port-busy="{{ T . "setup.port_busy" }}">
+             data-port-busy="{{ T . "setup.port_busy" }}"
+             data-active-port="{{ .CurrentPort }}"
+             data-port-in-use="{{ T . "setup.port_in_use" }}">
             <ul class="list-unstyled mb-0" id="setup-ports-items"></ul>
         </div>
     </div>
@@ -38,33 +40,6 @@
 
 <div id="setup-result" class="d-none"></div>
 
-{{ if .CurrentPort }}
-<div class="card mt-3" id="setup-test-card"
-     data-test-label="{{ T . "setup.test" }}"
-     data-testing-label="{{ T . "setup.testing" }}"
-     data-self-number="{{ .SelfNumber }}"
-     data-test-ok="{{ T . "setup.test_ok" }}"
-     data-test-timeout="{{ T . "setup.test_timeout" }}"
-     data-test-failed="{{ T . "setup.test_failed" }}"
-     data-test-no-self="{{ T . "setup.test_no_self" }}">
-    <div class="card-header">{{ T . "setup.test_title" }}</div>
-    <div class="card-body">
-        <p class="mb-2">{{ T . "setup.test_intro" }}</p>
-        {{ if .SelfNumber }}
-        <p class="mb-2 small text-muted">
-            {{ T . "setup.test_self" }}: <code>{{ .SelfNumber }}</code>
-        </p>
-        {{ else }}
-        <p class="mb-2 small text-danger">{{ T . "setup.test_no_self" }}</p>
-        {{ end }}
-        <button type="button" class="btn btn-outline-primary" id="setup-test-btn"
-                {{ if not .SelfNumber }}disabled{{ end }}>
-            {{ T . "setup.test" }}
-        </button>
-        <div id="setup-test-result" class="mt-3 d-none"></div>
-    </div>
-</div>
-{{ end }}
 
 
 <div class="card mt-3" id="setup-diag-card"

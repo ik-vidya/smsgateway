@@ -125,6 +125,7 @@
   "setup.manufacturer": "Ražotājs",
   "setup.model": "Modelis",
   "setup.port_busy": "Portu izmanto palaists serviss. Izmantojiet «Modema diagnostika» vai «Sūtīšanas + saņemšanas tests».",
+  "setup.port_in_use": "izmanto serviss",
   "setup.ports": "Atrastie porti",
   "setup.probe": "Pārbaudīt",
   "setup.probing": "Pārbauda…",

@@ -195,9 +195,11 @@
             saved: list.dataset.saved,
             saveFailed: list.dataset.saveFailed,
             portBusy: list.dataset.portBusy,
+            portInUse: list.dataset.portInUse,
         };
 
         var probedPort = '';
+        var activePort = list.dataset.activePort || '';
 
         function renderPorts(ports) {
             items.innerHTML = '';
@@ -211,11 +213,23 @@
             ports.forEach(function (p) {
                 var li = document.createElement('li');
                 li.className = 'setup-port-item d-flex align-items-center gap-2 mb-2';
+                var isActive = (p === activePort);
+                var action;
+                if (isActive) {
+                    // Порт уже открыт сервисом — «Проверить» даст
+                    // 409 (или таймаут, если проверка не сработала).
+                    // Показываем бейдж, чтобы пользователь не жал
+                    // кнопку впустую.
+                    action = '<span class="badge bg-secondary">' +
+                        escapeHtml(labels.portInUse) + '</span>';
+                } else {
+                    action = '<button type="button" class="btn btn-sm btn-primary setup-probe"' +
+                        ' data-port="' + escapeHtml(p) + '">' +
+                        escapeHtml(labels.probe) + '</button>';
+                }
                 li.innerHTML =
                     '<code class="flex-grow-1">' + escapeHtml(p) + '</code>' +
-                    '<button type="button" class="btn btn-sm btn-primary setup-probe"' +
-                    ' data-port="' + escapeHtml(p) + '">' +
-                    escapeHtml(labels.probe) + '</button>';
+                    action;
                 items.appendChild(li);
             });
         }
@@ -341,88 +355,7 @@
 
     // ==================== /setup/test ====================
 
-    function initSetupTest() {
-        var card = document.getElementById('setup-test-card');
-        if (!card) return;
-
-        var btn = document.getElementById('setup-test-btn');
-        var result = document.getElementById('setup-test-result');
-        if (!btn || !result) return;
-
-        var labels = {
-            test: card.dataset.testLabel,
-            testing: card.dataset.testingLabel,
-            selfNumber: card.dataset.selfNumber,
-            ok: card.dataset.testOk,
-            timeout: card.dataset.testTimeout,
-            failed: card.dataset.testFailed,
-            noSelf: card.dataset.testNoSelf,
-        };
-
-        btn.addEventListener('click', function () {
-            btn.disabled = true;
-            btn.textContent = labels.testing;
-            result.classList.remove('d-none');
-            result.className = 'mt-3 alert alert-secondary';
-            result.textContent = '…';
-
-            fetch('/setup/test', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: '{}',
-            }).then(function (resp) {
-                return resp.json().then(function (j) {
-                    return { status: resp.status, body: j };
-                });
-            }).then(function (r) {
-                showTestResult(r.status, r.body);
-            }).catch(function (err) {
-                showTestResult(0, { error: String(err) });
-            }).finally(function () {
-                btn.disabled = false;
-                btn.textContent = labels.test;
-            });
-        });
-
-        function showTestResult(status, body) {
-            result.classList.remove('d-none');
-            if (status === 400 && body && body.error &&
-                body.error.indexOf('SELF_NUMBER') >= 0) {
-                result.className = 'mt-3 alert alert-warning';
-                result.textContent = labels.noSelf;
-                return;
-            }
-            if (status !== 200 || (body && body.error && !body.id)) {
-                result.className = 'mt-3 alert alert-danger';
-                var msg = (body && body.error) || 'error';
-                result.textContent = labels.failed + ': ' + msg;
-                return;
-            }
-
-            var statusName = body.status || '?';
-            if (statusName === 'delivered') {
-                result.className = 'mt-3 alert alert-success';
-                result.textContent = labels.ok;
-                return;
-            }
-            if (body.timed_out) {
-                result.className = 'mt-3 alert alert-warning';
-                result.textContent = labels.timeout;
-                return;
-            }
-            if (statusName === 'failed') {
-                result.className = 'mt-3 alert alert-danger';
-                var errMsg = body.error || statusName;
-                result.textContent = labels.failed + ': ' + errMsg;
-                return;
-            }
-            // sent / sent_no_dr / received / queued — промежуточные.
-            result.className = 'mt-3 alert alert-info';
-            result.textContent = labels.ok + ' (status: ' + statusName + ')';
-        }
-    }
-
-    // ==================== общее ====================
+        // ==================== общее ====================
 
     function escapeHtml(s) {
         return String(s)
@@ -662,17 +595,22 @@
 
             var parts = [];
 
-            var sentStatus = (body.sent && body.sent.status) || '?';
-            var sentText = labels.sent + ': ' + sentStatus;
-            if (body.sent && body.sent.timed_out) sentText += ' (timeout)';
-            if (body.sent && body.sent.error) sentText += ' — ' + body.sent.error;
+            // Отправка: id, статус, reference (TP-MR от модема).
+            var sent = body.sent || {};
+            var sentText = labels.sent + ': ' + (sent.status || '?');
+            if (sent.id) sentText += ' (id ' + sent.id + ')';
+            if (sent.reference) sentText += ', ref ' + sent.reference;
+            if (sent.timed_out) sentText += ' (timeout)';
+            if (sent.error) sentText += ' — ' + sent.error;
             parts.push('<div class="mb-2">' + escapeHtml(sentText) + '</div>');
 
+            // Приём: id, текст (содержит маркер), время.
             var cls;
             if (body.received) {
-                parts.push('<div class="mb-2">' + escapeHtml(labels.received) +
-                    ': #' + body.received.id + ' ' +
-                    escapeHtml(body.received.text) + '</div>');
+                var r = body.received;
+                var recvText = labels.received + ': id ' + r.id;
+                if (r.text) recvText += ', «' + r.text + '»';
+                parts.push('<div class="mb-2">' + escapeHtml(recvText) + '</div>');
                 parts.push('<div class="fw-semibold text-success">&#10003; ' +
                     escapeHtml(labels.success) + '</div>');
                 cls = 'alert-success';
