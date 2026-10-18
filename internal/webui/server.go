@@ -146,6 +146,11 @@ func (s *Server) Shutdown(ctx context.Context) error {
 func (s *Server) routes() http.Handler {
 	mux := http.NewServeMux()
 
+	// /healthz — для heartbeat'а на /setup (fetch раз в 2с).
+	// Без авторизации: проверяем только «процесс жив»,
+	// никаких данных.
+	mux.HandleFunc("GET /healthz", s.handleHealthz)
+
 	mux.HandleFunc("GET /{$}", s.handleDashboard)
 	mux.HandleFunc("GET /inbox", s.handleInbox)
 	mux.HandleFunc("GET /outbox", s.handleOutbox)
@@ -389,3 +394,16 @@ func newStaticHandler() http.Handler {
 //
 // Путь в r.URL.Path — ещё с префиксом /static/ (обёртка стоит
 // до StripPrefix), поэтому filepath.Ext работает как обычно.
+
+// handleHealthz — GET /healthz.
+//
+// Используется heartbeat'ом на /setup: fetch('/healthz') раз в
+// 2 секунды. Если сервис отвечает 200 — всё хорошо, страница
+// не показывает баннер. Если не отвечает (перезапускается) —
+// показывает оранжевый баннер и перезагружается при
+// восстановлении.
+func (s *Server) handleHealthz(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(`{"status":"ok"}`))
+}
