@@ -87,6 +87,7 @@ func NewBuffer(size int) *Buffer {
 // счётчик dropped (SSE-клиент получит об этом предупреждение).
 func (b *Buffer) Add(e Entry) {
 	b.mu.Lock()
+	defer b.mu.Unlock()
 
 	b.entries[b.pos] = e
 	b.pos++
@@ -95,16 +96,17 @@ func (b *Buffer) Add(e Entry) {
 		b.full = true
 	}
 
-	// Собираем срез подписчиков, чтобы не держать мьютекс при
-	// отправке в каналы.
-	subs := make([]*subscriber, 0, len(b.subs))
+	// Отправка в каналы подписчиков — под тем же мьютексом, что
+	// и Unsubscribe. Иначе Add и Unsubscribe гоняются за канал:
+	// Unsubscribe делает close(s.ch), а Add — s.ch <- e. Это
+	// не только data race (детектируется -race), но и рано или
+	// поздно panic: send on closed channel (select не защищает
+	// от закрытого канала — default не спасает).
+	//
+	// Отправка неблокирующая: буфер канала 256, при переполнении
+	// срабатывает default и инкрементится dropped. Так что
+	// мьютекс держится микросекунды.
 	for _, s := range b.subs {
-		subs = append(subs, s)
-	}
-
-	b.mu.Unlock()
-
-	for _, s := range subs {
 		select {
 		case s.ch <- e:
 		default:

@@ -86,6 +86,35 @@ func (m *MockTransport) Read(p []byte) (int, error) {
 //  2. первый unsolicited (matchCmd == "");
 //  3. fallback для AT+CPIN? — «+CPIN: READY», если явного ответа нет.
 func (m *MockTransport) Write(p []byte) (int, error) {
+	// Payload-запись (payload для ExecPrompt, оканчивающийся на
+	// Ctrl-Z 0x1a): это НЕ новая AT-команда, а продолжение
+	// текущего ExecPrompt. Не расходуем на неё следующую
+	// unsolicited-запись из скрипта.
+	//
+	// Почему это важно: ExecPrompt делает ДВЕ записи — команду и
+	// payload. Раньше mock тратил unsolicited на payload, и ответ
+	// для следующего ExecPrompt оказывался в buf слишком рано.
+	// Пока reader его не прочитал, drainRespCh перед второй
+	// командой мог слить только часть (промпт `> `), а
+	// `+CMGS: 11` / `OK` приходили уже в prompt-loop, где `OK`
+	// трактовался как терминатор → ExecPrompt возвращал «OK» без
+	// `+CMGS` → parseCMGSReference падал с «+CMGS не найден».
+	// Гонка видна только под -race (reader отстаёт от drain).
+	//
+	// С этой проверкой порядок детерминирован: команда → prompt,
+	// payload → ничего (ответ уже в очереди), следующая команда →
+	// следующий ответ. Это и есть поведение реального модема.
+	if len(p) > 0 && p[len(p)-1] == 0x1a {
+		m.mu.Lock()
+		if m.closed {
+			m.mu.Unlock()
+			return 0, io.ErrClosedPipe
+		}
+		m.writeBuf.Write(p)
+		m.mu.Unlock()
+		return len(p), nil
+	}
+
 	cmd := string(bytes.TrimRight(p, "\r\n"))
 
 	m.mu.Lock()
