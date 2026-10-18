@@ -79,14 +79,23 @@ func ListSerialPorts() ([]string, error) {
 
 // OpenSerialWithRetry пытается открыть порт с повторами.
 // Нужно при старте сервиса или после syscall.Exec, когда
-// ядро ещё не успело создать /dev/ttyUSB*.
-func OpenSerialWithRetry(cfg SerialConfig, attempts int, delay time.Duration) (serial.Port, error) {
+// ядро ещё не успело создать /dev/ttyUSB* или /dev/serial/by-id/*.
+//
+// Если logger != nil, раз в 5 попыток пишет Warn — чтобы было
+// видно, что сервис жив и ждёт порт.
+func OpenSerialWithRetry(cfg SerialConfig, attempts int, delay time.Duration, logger Logger) (serial.Port, error) {
 	var err error
 	var port serial.Port
 	for i := 1; i <= attempts; i++ {
 		port, err = OpenSerial(cfg)
 		if err == nil {
+			if i > 1 && logger != nil {
+				logger.Info("modem: порт открыт после ожидания", "attempts", i)
+			}
 			return port, nil
+		}
+		if logger != nil && i%5 == 0 {
+			logger.Warn("modem: ожидание порта", "attempt", i, "max", attempts, "port", cfg.Port)
 		}
 		if i < attempts {
 			time.Sleep(delay)

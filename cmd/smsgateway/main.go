@@ -271,7 +271,7 @@ func runService(_ *cobra.Command, _ []string) error {
 		port, err := modem.OpenSerialWithRetry(modem.SerialConfig{
 			Port: cfg.SerialPort,
 			Baud: cfg.SerialBaud,
-		}, 15, time.Second)
+		}, 60, time.Second, slogAdapter{logger})
 		if err != nil {
 			err = fmt.Errorf("открытие serial: %w", err)
 			notifier.Notify(ctx, notify.LevelCritical, err)
