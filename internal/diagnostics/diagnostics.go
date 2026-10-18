@@ -14,6 +14,21 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
+)
+
+// Таймауты диагностики.
+//
+// Collect шлёт ~14 AT-команд последовательно. На SIM800L
+// в роуминге отдельные команды (AT+COPS?, AT+CSCA?,
+// AT+CPMS?) отвечают медленно. Раньше использовался
+// MODEM_CMD_TIMEOUT=5s на команду, и худший случай
+// (14 × 5s) = 70s — /diagnostics висел почти минуту.
+//
+// Теперь: 2s на команду, 15s на весь опрос.
+const (
+	diagPerCmdTimeout = 2 * time.Second
+	diagTotalTimeout  = 15 * time.Second
 )
 
 // Modem — минимальный интерфейс, нужный для сбора диагностики.
@@ -70,38 +85,87 @@ type StorageInfo struct {
 }
 
 // Collect собирает диагностику.
+//
+// Общий бюджет — 15 секунд, на команду — 2 секунды. Если
+// команда не уложилась, поле остаётся пустым, а причина
+// пишется в Raw.
+//
+// IMEI/IMSI/ICCID проходят через sanitizeValue: стрипается
+// \r, \n, пробелы, берётся первая непустая строка. На
+// SIM800L в момент таймаута UART может глюкнуть, и в IMEI
+// попадает \r в середине («0\r86060»). После sanitize это
+// как минимум не ломает JSON; для IMEI дополнительно
+// проверяется формат (15 цифр) с warning в Raw.
 func Collect(ctx context.Context, m Modem) (Result, error) {
+	ctx, cancel := context.WithTimeout(ctx, diagTotalTimeout)
+	defer cancel()
+
 	r := Result{Raw: make(map[string]string)}
 
-	r.Manufacturer = trim(exec(ctx, m, "AT+CGMI", r.Raw))
-	r.Model = trim(exec(ctx, m, "AT+CGMM", r.Raw))
-	r.Revision = trim(exec(ctx, m, "AT+CGMR", r.Raw))
-	r.IMEI = trim(exec(ctx, m, "AT+CGSN", r.Raw))
-	r.IMSI = trim(exec(ctx, m, "AT+CIMI", r.Raw))
-	r.ICCID = trim(exec(ctx, m, "AT+CCID", r.Raw))
+	execCmd := func(cmd string) string {
+		cctx, ccancel := context.WithTimeout(ctx, diagPerCmdTimeout)
+		defer ccancel()
+		resp, err := m.Exec(cctx, cmd)
+		if err != nil {
+			r.Raw[cmd] = "ERROR: " + err.Error()
+			return ""
+		}
+		r.Raw[cmd] = resp
+		return resp
+	}
 
-	r.SIMStatus = parseSIMStatus(exec(ctx, m, "AT+CPIN?", r.Raw))
-	r.Signal = parseSignal(exec(ctx, m, "AT+CSQ", r.Raw))
-	r.Registration = parseCREG(exec(ctx, m, "AT+CREG?", r.Raw))
-	r.GPRSRegistration = parseCREG(exec(ctx, m, "AT+CGREG?", r.Raw))
-	r.Operator = parseOperator(exec(ctx, m, "AT+COPS?", r.Raw))
-	r.SMSC = parseSMSC(exec(ctx, m, "AT+CSCA?", r.Raw))
-	r.Storage = parseStorage(exec(ctx, m, "AT+CPMS?", r.Raw))
+	r.Manufacturer = sanitizeValue(execCmd("AT+CGMI"))
+	r.Model = sanitizeValue(execCmd("AT+CGMM"))
+	r.Revision = sanitizeValue(execCmd("AT+CGMR"))
+	r.IMEI = sanitizeValue(execCmd("AT+CGSN"))
+	if r.IMEI != "" && !isValidIMEI(r.IMEI) {
+		r.Raw["AT+CGSN.warning"] = fmt.Sprintf(
+			"invalid IMEI %q (expected 15 digits)", r.IMEI)
+	}
+	r.IMSI = sanitizeValue(execCmd("AT+CIMI"))
+	r.ICCID = sanitizeValue(execCmd("AT+CCID"))
+
+	r.SIMStatus = parseSIMStatus(execCmd("AT+CPIN?"))
+	r.Signal = parseSignal(execCmd("AT+CSQ"))
+	r.Registration = parseCREG(execCmd("AT+CREG?"))
+	r.GPRSRegistration = parseCREG(execCmd("AT+CGREG?"))
+	r.Operator = parseOperator(execCmd("AT+COPS?"))
+	r.SMSC = parseSMSC(execCmd("AT+CSCA?"))
+	r.Storage = parseStorage(execCmd("AT+CPMS?"))
 
 	return r, nil
 }
 
-// ==================== вспомогательное ====================
-
-func exec(ctx context.Context, m Modem, cmd string, raw map[string]string) string {
-	resp, err := m.Exec(ctx, cmd)
-	if err != nil {
-		raw[cmd] = "ERROR: " + err.Error()
+// sanitizeValue стрипает \r, \n, пробелы и берёт первую
+// непустую строку.
+func sanitizeValue(s string) string {
+	if s == "" {
 		return ""
 	}
-	raw[cmd] = resp
-	return resp
+	for _, line := range strings.Split(s, "\n") {
+		line = strings.ReplaceAll(line, "\r", "")
+		line = strings.TrimSpace(line)
+		if line != "" {
+			return line
+		}
+	}
+	return ""
 }
+
+// isValidIMEI проверяет, что строка — 15 цифр.
+func isValidIMEI(s string) bool {
+	if len(s) != 15 {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// (exec удалён: заменён на замыкание execCmd в Collect.)
 
 func trim(s string) string {
 	for _, line := range strings.Split(s, "\n") {

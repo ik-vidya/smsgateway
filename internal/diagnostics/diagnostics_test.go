@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 )
 
 type mockModem struct {
@@ -271,5 +272,81 @@ func TestParseSMSCPlain(t *testing.T) {
 	in := `+CSCA: "+3725509911",145`
 	if got := parseSMSC(in); got != "+3725509911" {
 		t.Errorf("parseSMSC(%q)=%q", in, got)
+	}
+}
+
+// TestCollectTimeouts — общий бюджет diagTotalTimeout,
+// на команду diagPerCmdTimeout. Мок блокируется до отмены
+// контекста — проверяем, что Collect не висит дольше
+// diagTotalTimeout.
+func TestCollectTimeouts(t *testing.T) {
+	start := time.Now()
+	_, err := Collect(context.Background(), &slowDiagModem{})
+	dur := time.Since(start)
+	if err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+	maxAllowed := diagTotalTimeout + 2*time.Second
+	if dur > maxAllowed {
+		t.Errorf("Collect занял %v, ожидалось не больше %v",
+			dur, maxAllowed)
+	}
+}
+
+// slowDiagModem — блокируется до отмены контекста.
+type slowDiagModem struct{}
+
+func (slowDiagModem) Exec(ctx context.Context, _ string) (string, error) {
+	<-ctx.Done()
+	return "", ctx.Err()
+}
+
+func TestSanitizeValue(t *testing.T) {
+	cases := map[string]string{
+		"863584038586060":         "863584038586060",
+		"863584038586060\nOK":     "863584038586060",
+		"863584038586060\r\nOK":   "863584038586060",
+		"  863584038586060  ":     "863584038586060",
+		"0\r86060":                "086060",
+		"\r\n\r\n863584038586060": "863584038586060",
+		"":                        "",
+		"\r\n":                    "",
+	}
+	for in, want := range cases {
+		if got := sanitizeValue(in); got != want {
+			t.Errorf("sanitizeValue(%q)=%q, ожидалось %q",
+				in, got, want)
+		}
+	}
+}
+
+func TestIsValidIMEI(t *testing.T) {
+	cases := map[string]bool{
+		"863584038586060":  true,
+		"086060":           false,
+		"8635840385860600": false,
+		"86358403858606A":  false,
+		"":                 false,
+	}
+	for in, want := range cases {
+		if got := isValidIMEI(in); got != want {
+			t.Errorf("isValidIMEI(%q)=%v, ожидалось %v",
+				in, got, want)
+		}
+	}
+}
+
+func TestCollectInvalidIMEIWarning(t *testing.T) {
+	m := fullMock()
+	m.responses["AT+CGSN"] = "0\r86060" // глюк UART
+	r, err := Collect(context.Background(), m)
+	if err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+	if r.IMEI != "086060" {
+		t.Errorf("IMEI=%q, ожидалось 086060 (после sanitize)", r.IMEI)
+	}
+	if _, ok := r.Raw["AT+CGSN.warning"]; !ok {
+		t.Error("нет warning в Raw для невалидного IMEI")
 	}
 }
