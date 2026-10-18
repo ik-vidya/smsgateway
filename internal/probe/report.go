@@ -4,6 +4,7 @@ package probe
 import (
 	"fmt"
 	"io"
+	"regexp"
 	"strings"
 )
 
@@ -29,8 +30,8 @@ func (r *Result) RenderHuman(w io.Writer) {
 
 	fmt.Fprintln(w, "Сеть:")
 	fmt.Fprintf(w, "  CSQ:    %s\n", orDash(r.CSQ))
-	fmt.Fprintf(w, "  CREG:   %s\n", orDash(r.CREG))
-	fmt.Fprintf(w, "  CGREG:  %s\n", orDash(r.CGREG))
+	fmt.Fprintf(w, "  CREG:   %s\n", r.cregLine("AT+CREG?"))
+	fmt.Fprintf(w, "  CGREG:  %s\n", r.cregLine("AT+CGREG?"))
 	fmt.Fprintf(w, "  COPS:   %s\n", orDash(r.COPS))
 	if r.COPSRaw != "" {
 		fmt.Fprintf(w, "  COPS=?: %s\n", r.COPSRaw)
@@ -81,6 +82,85 @@ func (r *Result) RenderHuman(w io.Writer) {
 		}
 		fmt.Fprintln(w)
 	}
+}
+
+// cregLine форматирует строку CREG/CGREG с подсказкой, если
+// команда упала (обычно по таймауту), но COPS показывает
+// оператора — значит, модем в сети, просто AT+CREG? не
+// уложилась в таймаут. Типично для SIM800L в роуминге 2G.
+//
+// Примеры:
+//
+//	"+CREG: 2,1,\"00DF\",\"156B\"" → как есть.
+//	"" + timeout + COPS="TELE2"    → "— (timeout; COPS=TELE2 — вероятно, зарегистрирован)"
+//	"" + timeout без COPS          → "— (timeout)"
+//	"" без ошибки                  → "—"
+func (r *Result) cregLine(cmd string) string {
+	var val string
+	switch cmd {
+	case "AT+CREG?":
+		val = r.CREG
+	case "AT+CGREG?":
+		val = r.CGREG
+	}
+	if strings.TrimSpace(val) != "" {
+		return orDash(val)
+	}
+
+	errMsg, hasErr := r.Errors[cmd]
+	if !hasErr {
+		return "—"
+	}
+
+	kind := "error"
+	if isTimeoutErr(errMsg) {
+		kind = "timeout"
+	}
+
+	hint := ""
+	if op := extractOperatorName(r.COPS); op != "" {
+		hint = fmt.Sprintf("; COPS=%s — вероятно, зарегистрирован", op)
+	}
+	return fmt.Sprintf("— (%s%s)", kind, hint)
+}
+
+// isTimeoutErr — грубая эвристика по тексту ошибки.
+//
+// Реальный текст из modem.transport.Exec:
+//
+//	"таймаут 5s ожидания ответа на \"AT+CREG?\""
+//
+// context.DeadlineExceeded даёт "context deadline exceeded".
+// Всё остальное считаем generic error.
+func isTimeoutErr(s string) bool {
+	ls := strings.ToLower(s)
+	if strings.Contains(ls, "таймаут") {
+		return true
+	}
+	if strings.Contains(ls, "timeout") {
+		return true
+	}
+	if strings.Contains(ls, "deadline exceeded") {
+		return true
+	}
+	return false
+}
+
+// reCOPSName разбирает +COPS?: <mode>,<format>,"<oper>".
+//
+// Если oper пуст (модем не зарегистрирован) — ответ вида
+// "+COPS: 0" без запятой, регулярка не совпадёт.
+var reCOPSName = regexp.MustCompile(`\+COPS:\s*\d+\s*,\s*\d+\s*,\s*"([^"]*)"`)
+
+// extractOperatorName достаёт имя оператора из ответа +COPS?.
+// Возвращает "" для "+COPS: 0" (не зарегистрирован) и для
+// непарсибельного ответа.
+func extractOperatorName(cops string) string {
+	m := reCOPSName.FindStringSubmatch(cops)
+	if len(m) < 2 {
+		return ""
+	}
+	return m[1]
 }
 
 func orDash(s string) string {

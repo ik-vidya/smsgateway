@@ -79,17 +79,93 @@ GOWORK=off go test ./... -timeout 60s
 
 `GOWORK=off` эмулирует CI.
 
-**Порядок в `z.sh` (если используется):**
 
-1. `apply-*.py`
-2. `gofmt -s -w .`
-3. пре-чек (`tidy build vet test`) — **`set -e`, при FAIL стоп**
-4. `git commit`
-5. `make build` + verify version
-6. `git push`
+**Обёртка для Python-скрипта — обязательный порядок:**
 
-**`make build` — ПОСЛЕ commit, ДО push.** Иначе `git describe --dirty`
-даст `-dirty`, а `git describe --always` — предыдущий SHA.
+При выдаче Python-скрипта всегда прикладывать bash-обёртку
+строго по этому шаблону. Порядок не менять — иначе `version`
+в бинарнике будет `-dirty` или со старым SHA.
+
+```bash
+#!/bin/bash -euo pipefail
+cd /mnt/Data-work/Projects/go-projects/go-smsd/smsgateway
+
+# 1. Применить изменения.
+python3 apply-XXX.py
+
+# 2. Форматирование ВСЕГО дерева до commit
+#    (совместимо с `make fmt`: gofmt -s -w ., иначе
+#    `make build` найдёт не-упрощённые файлы и сделает -dirty).
+gofmt -s -w .
+
+# 3. Пре-чек: set -e остановит на первой ошибке.
+#    При FAIL — коммита НЕ будет.
+GOWORK=off go mod tidy
+GOWORK=off go build ./...
+GOWORK=off go vet ./...
+GOWORK=off go test ./... -timeout 60s
+
+# 4. Commit — только если пре-чек прошёл.
+git add -A
+git commit -m "$(cat <<'EOF'
+<тема>
+
+<тело: Изменения / Тесты / Проверено>
+
+Assisted-by: DeepSeek chat
+EOF
+)"
+
+# 5. make build — ПОСЛЕ commit, ДО push.
+#    Тогда version: без -dirty, с актуальным SHA.
+make build
+./bin/smsgateway version
+
+# 6. Если make build (tidy/fmt) изменил файлы — amend и пересборка,
+#    иначе version снова станет -dirty.
+if [ -n "$(git status --short)" ]; then
+    echo "WARNING: make build изменил файлы — amend"
+    git add -A
+    git commit --amend --no-edit
+    make build
+    ./bin/smsgateway version
+fi
+
+# 7. push — только если всё выше прошло.
+git push
+```
+
+**Почему именно такой порядок:**
+
+- `gofmt -s -w .` до commit → `make build`'s `gofmt` не найдёт
+  изменений → version без `-dirty`.
+- Пре-чек до commit → при FAIL нет мусорного коммита в истории
+  (это уже случалось: `70ade33` ушёл в `main` некомпилируемым).
+- `make build` после commit → `git describe --always` видит
+  актуальный коммит (а не предыдущий), `--dirty` не выставляется.
+- `make build` до push → если сборка упала (что маловероятно после
+  `go build ./...`, но `-ldflags`/`-trimpath`/CGO могут дать сбой),
+  коммит остаётся локальным, push не выполняется. Не публикуем
+  нерабочее.
+- Проверка `git status --short` после `make build` — защита от
+  случая, когда `tidy` или `fmt` внутри `make build` неожиданно
+  изменили файл (например, обновили `go.sum`). Auto-amend
+  гарантирует, что `version` в артефакте совпадает с SHA коммита.
+
+**Что НЕ делать:**
+
+- `make build` до `git commit` — version будет `-dirty` и со
+  старым SHA (уже случалось: `870e00c-dirty` при HEAD
+  `b7145013`).
+- `git commit` без пре-чека — некомпилируемый коммит в `main`
+  (уже случалось: `70ade33` с `undefined: strings`).
+- `git push` до `make build` — на удалённой машине окажется
+  версия, которую вы не проверили.
+- `git commit --amend` после `git push` — перезапись уже
+  опубликованной истории (нужен force-push, ломает коллег).
+- `gofmt -w internal/ cmd/` вместо `gofmt -s -w .` — `make fmt`
+  использует `-s`, а `make build` вызывает `make fmt`.
+  Несовпадение флагов → `-dirty`.
 
 ---
 

@@ -92,6 +92,14 @@ type Options struct {
 	// CmdTimeout — таймаут одной AT-команды. 0 — 5s.
 	CmdTimeout time.Duration
 
+	// CREGTimeout — отдельный таймаут для AT+CREG? и AT+CGREG?.
+	// SIM800L в роуминге 2G может отвечать на них медленнее
+	// остальных команд: 5s не хватает, 10s обычно достаточно.
+	// 0 — равен CmdTimeout (совместимо с прежним поведением).
+	//
+	// CLI (cmd/smsgateway/cmd_probe.go) по умолчанию ставит 10s.
+	CREGTimeout time.Duration
+
 	// ScanNetworks — выполнить AT+COPS=? (медленно).
 	ScanNetworks bool
 
@@ -109,6 +117,9 @@ func Run(ctx context.Context, m Modem, opts Options) (*Result, error) {
 	}
 	if opts.CmdTimeout <= 0 {
 		opts.CmdTimeout = 5 * time.Second
+	}
+	if opts.CREGTimeout <= 0 {
+		opts.CREGTimeout = opts.CmdTimeout
 	}
 	if opts.ScanNetworksTimeout <= 0 {
 		opts.ScanNetworksTimeout = 180 * time.Second
@@ -141,8 +152,10 @@ func Run(ctx context.Context, m Modem, opts Options) (*Result, error) {
 
 	// Сеть.
 	r.CSQ = r.exec(ctx, m, "AT+CSQ", opts.CmdTimeout)
-	r.CREG = r.exec(ctx, m, "AT+CREG?", opts.CmdTimeout)
-	r.CGREG = r.exec(ctx, m, "AT+CGREG?", opts.CmdTimeout)
+	// CREG/CGREG — отдельный (более щедрый) таймаут:
+	// SIM800L в роуминге может «думать» дольше остальных команд.
+	r.CREG = r.exec(ctx, m, "AT+CREG?", opts.CREGTimeout)
+	r.CGREG = r.exec(ctx, m, "AT+CGREG?", opts.CREGTimeout)
 	r.COPS = r.exec(ctx, m, "AT+COPS?", opts.CmdTimeout)
 
 	if opts.ScanNetworks {

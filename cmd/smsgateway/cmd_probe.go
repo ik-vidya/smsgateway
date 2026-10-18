@@ -25,6 +25,7 @@ func cmdProbe() *cobra.Command {
 		name         string
 		force        bool
 		timeout      time.Duration
+		cregTimeout  time.Duration
 		scanNetworks bool
 		copsTimeout  time.Duration
 	)
@@ -42,6 +43,11 @@ SIM, сеть, SMS, питание, поддержка опциональных 
 probe" — при повторном запуске он будет перезаписан. Файл без
 маркера не перезаписывается без --force.
 
+AT+CREG? и AT+CGREG? опрашиваются с отдельным таймаутом
+--creg-timeout (по умолчанию 10s): SIM800L в роуминге 2G
+может «думать» дольше остальных команд, и при общем
+--timeout=5s ответ не успевает прийти.
+
 AT+COPS=? (сканирование сетей) НЕ входит в базовый опрос: он
 медленный (до 2-3 минут на SIM800). Включается флагом
 --scan-networks с отдельным таймаутом --cops-timeout.`,
@@ -50,7 +56,7 @@ AT+COPS=? (сканирование сетей) НЕ входит в базов�
 		SilenceErrors: true,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			return runProbe(port, baud, asJSON, output, name, force,
-				timeout, scanNetworks, copsTimeout)
+				timeout, cregTimeout, scanNetworks, copsTimeout)
 		},
 	}
 
@@ -66,7 +72,11 @@ AT+COPS=? (сканирование сетей) НЕ входит в базов�
 	c.Flags().BoolVar(&force, "force", false,
 		"перезаписать --output, даже если он не был сгенерирован probe")
 	c.Flags().DurationVar(&timeout, "timeout", 5*time.Second,
-		"таймаут одной AT-команды")
+		"таймаут одной AT-команды (кроме CREG/CGREG — "+
+			"см. --creg-timeout)")
+	c.Flags().DurationVar(&cregTimeout, "creg-timeout", 10*time.Second,
+		"таймаут AT+CREG? и AT+CGREG? (SIM800L в роуминге "+
+			"может «думать» дольше остальных)")
 	c.Flags().BoolVar(&scanNetworks, "scan-networks", false,
 		"выполнить AT+COPS=? (медленно, до 2-3 минут)")
 	c.Flags().DurationVar(&copsTimeout, "cops-timeout", 180*time.Second,
@@ -77,7 +87,7 @@ AT+COPS=? (сканирование сетей) НЕ входит в базов�
 
 func runProbe(port string, baud int, asJSON bool,
 	output, name string, force bool,
-	timeout time.Duration, scanNetworks bool,
+	timeout, cregTimeout time.Duration, scanNetworks bool,
 	copsTimeout time.Duration) error {
 
 	if output != "" && name == "" {
@@ -116,6 +126,7 @@ func runProbe(port string, baud int, asJSON bool,
 
 	res, err := probe.Run(ctx, m, probe.Options{
 		CmdTimeout:          timeout,
+		CREGTimeout:         cregTimeout,
 		ScanNetworks:        scanNetworks,
 		ScanNetworksTimeout: copsTimeout,
 	})
