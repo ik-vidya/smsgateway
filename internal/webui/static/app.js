@@ -195,6 +195,9 @@
             saveFailed: list.dataset.saveFailed,
             portBusy: list.dataset.portBusy,
             portInUse: list.dataset.portInUse,
+            introConfigured: list.dataset.introConfigured,
+            introDisconnected: list.dataset.introDisconnected,
+            serviceDown: list.dataset.serviceDown,
         };
 
         var probedPort = '';
@@ -202,31 +205,59 @@
 
         function renderPorts(ports) {
             items.innerHTML = '';
+            var isActivePresent = false;
+
             if (!ports || ports.length === 0) {
                 empty.classList.remove('d-none');
                 list.classList.add('d-none');
-                return;
+            } else {
+                empty.classList.add('d-none');
+                list.classList.remove('d-none');
+                ports.forEach(function (p) {
+                    if (p === activePort) isActivePresent = true;
+                    var li = document.createElement('li');
+                    li.className = 'setup-port-item d-flex align-items-center gap-2 mb-2';
+                    var isActive = (p === activePort);
+                    var action;
+                    if (isActive) {
+                        action = '<span class="badge bg-secondary">' +
+                            escapeHtml(labels.portInUse) + '</span>';
+                    } else {
+                        action = '<button type="button" class="btn btn-sm btn-primary setup-probe"' +
+                            ' data-port="' + escapeHtml(p) + '">' +
+                            escapeHtml(labels.probe) + '</button>';
+                    }
+                    li.innerHTML =
+                        '<code class="flex-grow-1">' + escapeHtml(p) + '</code>' +
+                        action;
+                    items.appendChild(li);
+                });
             }
-            empty.classList.add('d-none');
-            list.classList.remove('d-none');
-            ports.forEach(function (p) {
-                var li = document.createElement('li');
-                li.className = 'setup-port-item d-flex align-items-center gap-2 mb-2';
-                var isActive = (p === activePort);
-                var action;
-                if (isActive) {
-                    action = '<span class="badge bg-secondary">' +
-                        escapeHtml(labels.portInUse) + '</span>';
-                } else {
-                    action = '<button type="button" class="btn btn-sm btn-primary setup-probe"' +
-                        ' data-port="' + escapeHtml(p) + '">' +
-                        escapeHtml(labels.probe) + '</button>';
+            updateConnectionStatus(isActivePresent);
+        }
+
+        function updateConnectionStatus(isPresent) {
+            if (!activePort) return; // not configured yet
+
+            var introEl = document.getElementById('setup-intro');
+            var diagCard = document.getElementById('setup-diag-card');
+            var testCard = document.getElementById('setup-test-receive-card');
+
+            if (isPresent) {
+                if (introEl) {
+                    introEl.className = 'alert alert-info';
+                    introEl.textContent = labels.introConfigured;
                 }
-                li.innerHTML =
-                    '<code class="flex-grow-1">' + escapeHtml(p) + '</code>' +
-                    action;
-                items.appendChild(li);
-            });
+                if (diagCard) diagCard.classList.remove('opacity-50', 'pe-none');
+                if (testCard) testCard.classList.remove('opacity-50', 'pe-none');
+            } else {
+                if (introEl) {
+                    introEl.className = 'alert alert-danger';
+                    introEl.textContent = labels.introDisconnected;
+                }
+                if (diagCard) diagCard.classList.add('opacity-50', 'pe-none');
+                if (testCard) testCard.classList.add('opacity-50', 'pe-none');
+            }
         }
 
         items.addEventListener('click', function (ev) {
@@ -340,6 +371,30 @@
                 console.warn('setup: stream closed');
             }
         };
+
+        // Heartbeat: проверяем, жив ли сервис.
+        // При перезапуске (syscall.Exec) сервис отваливается на 3 секунды.
+        // Если упал — оранжевый баннер, если поднялся — page reload.
+        var isServiceDown = false;
+        setInterval(function () {
+            fetch('/healthz', { method: 'GET', cache: 'no-store' })
+                .then(function (r) {
+                    if (!r.ok) throw new Error('not ok');
+                    if (isServiceDown) {
+                        window.location.reload();
+                    }
+                })
+                .catch(function () {
+                    if (!isServiceDown) {
+                        isServiceDown = true;
+                        var introEl = document.getElementById('setup-intro');
+                        if (introEl) {
+                            introEl.className = 'alert alert-warning';
+                            introEl.textContent = labels.serviceDown;
+                        }
+                    }
+                });
+        }, 2000);
     }
 
     // ==================== setup: diagnostics + test-receive ====================

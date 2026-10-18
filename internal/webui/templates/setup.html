@@ -1,7 +1,7 @@
 {{ define "content" -}}
 <h1>{{ T . "setup.title" }}</h1>
 
-<div class="alert alert-info">
+<div class="alert alert-info" id="setup-intro">
     {{ if .CurrentPort }}
         {{ T . "setup.intro_configured" }}
     {{ else }}
@@ -36,7 +36,10 @@
              data-save-failed="{{ T . "setup.save_failed" }}"
              data-port-busy="{{ T . "setup.port_busy" }}"
              data-active-port="{{ .CurrentPort }}"
-             data-port-in-use="{{ T . "setup.port_in_use" }}">
+             data-port-in-use="{{ T . "setup.port_in_use" }}"
+             data-intro-configured="{{ T . "setup.intro_configured" }}"
+             data-intro-disconnected="{{ T . "setup.intro_disconnected" }}"
+             data-service-down="{{ T . "setup.service_down" }}">
             <ul class="list-unstyled mb-0" id="setup-ports-items"></ul>
         </div>
     </div>
