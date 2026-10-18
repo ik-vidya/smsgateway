@@ -16,6 +16,15 @@ func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 	data["HasStream"] = s.logs != nil
 	if s.logs == nil {
 		data["ErrorMessage"] = "Log buffer недоступен"
+		s.render(w, "logs", data)
+		return
+	}
+	data["BufferSize"] = s.logs.Size()
+	data["BufferCount"] = s.logs.Count()
+	oldest, newest := s.logs.OldestNewest()
+	if !oldest.IsZero() {
+		data["OldestTime"] = oldest
+		data["NewestTime"] = newest
 	}
 	s.render(w, "logs", data)
 }
@@ -104,4 +113,78 @@ func writeSSEWarning(w http.ResponseWriter, dropped int64) error {
 	_, err := fmt.Fprintf(w,
 		"event: warning\ndata: %d log entries dropped\n\n", dropped)
 	return err
+}
+
+// handleLogsDownload — GET /logs/download.
+//
+// Скачивает ring buffer как .log (text, совместимый с slog)
+// или .jsonl (json, каждая запись отдельной строкой).
+func (s *Server) handleLogsDownload(w http.ResponseWriter, r *http.Request) {
+	if s.logs == nil {
+		http.Error(w, "log buffer not configured",
+			http.StatusServiceUnavailable)
+		return
+	}
+
+	q := r.URL.Query()
+
+	f := logging.Filter{Contains: q.Get("contains")}
+	lvl, err := logging.ParseLevelFilter(q.Get("level"))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	f.MinLevel = lvl
+
+	if v := q.Get("since"); v != "" {
+		t, err := time.Parse(time.RFC3339, v)
+		if err != nil {
+			http.Error(w, "since: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		f.Since = t
+	}
+	if v := q.Get("until"); v != "" {
+		t, err := time.Parse(time.RFC3339, v)
+		if err != nil {
+			http.Error(w, "until: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		f.Until = t
+	}
+
+	entries := s.logs.SnapshotFiltered(f)
+
+	format := strings.ToLower(q.Get("format"))
+	if format == "" {
+		format = "text"
+	}
+
+	filename := "smsgateway-" + time.Now().Format("20060102-150405")
+	switch format {
+	case "text":
+		filename += ".log"
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	case "json":
+		filename += ".jsonl"
+		w.Header().Set("Content-Type", "application/x-ndjson; charset=utf-8")
+	default:
+		http.Error(w, `format должен быть "text" или "json"`,
+			http.StatusBadRequest)
+		return
+	}
+	w.Header().Set("Content-Disposition",
+		`attachment; filename="`+filename+`"`)
+
+	switch format {
+	case "text":
+		for _, e := range entries {
+			_, _ = fmt.Fprintln(w, e.Text())
+		}
+	case "json":
+		enc := json.NewEncoder(w)
+		for _, e := range entries {
+			_ = enc.Encode(e)
+		}
+	}
 }

@@ -153,6 +153,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /messages/{id}", s.handleMessageDetail)
 	mux.HandleFunc("GET /logs", s.handleLogs)
 	mux.HandleFunc("GET /logs/stream", s.handleLogsStream)
+	mux.HandleFunc("GET /logs/download", s.handleLogsDownload)
 	mux.HandleFunc("GET /setup", s.handleSetup)
 	mux.HandleFunc("GET /setup/ports/stream", s.handleSetupPortsStream)
 	mux.HandleFunc("POST /setup/probe", s.handleSetupProbe)

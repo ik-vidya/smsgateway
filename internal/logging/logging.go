@@ -73,3 +73,19 @@ func parseLevel(s string) (slog.Level, error) {
 	}
 	return 0, fmt.Errorf("неизвестный уровень лога %q", s)
 }
+
+// ParseLevelFilter разбирает имя уровня для API /logs/download.
+// "all" и "" — slog.LevelDebug (пропустить всё).
+func ParseLevelFilter(s string) (slog.Level, error) {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "", "all", "debug":
+		return slog.LevelDebug, nil
+	case "info":
+		return slog.LevelInfo, nil
+	case "warn", "warning":
+		return slog.LevelWarn, nil
+	case "error":
+		return slog.LevelError, nil
+	}
+	return 0, fmt.Errorf("неизвестный уровень %q (ожидается all|debug|info|warn|error)", s)
+}

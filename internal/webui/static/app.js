@@ -112,9 +112,63 @@
         if (levelSelect) {
             levelSelect.addEventListener('change', function () {
                 minLevel = levelSelect.value;
+                updateDownloadLinks();
             });
         }
 
+        var searchInput = document.getElementById('logs-search');
+        var searchNeedle = '';
+        if (searchInput) {
+            searchInput.addEventListener('input', function () {
+                searchNeedle = searchInput.value.trim().toLowerCase();
+                applySearch();
+                updateDownloadLinks();
+            });
+        }
+
+        function lineMatchesSearch(text) {
+            if (searchNeedle === '') return true;
+            return text.toLowerCase().indexOf(searchNeedle) !== -1;
+        }
+
+        function applySearch() {
+            var lines = container.querySelectorAll('.log-line');
+            for (var i = 0; i < lines.length; i++) {
+                var el = lines[i];
+                var text = el.dataset.rawText || el.textContent || '';
+                el.style.display = lineMatchesSearch(text) ? '' : 'none';
+            }
+        }
+
+        function updateDownloadLinks() {
+            var level = (levelSelect && levelSelect.value) || 'DEBUG';
+            var levelQ = level === 'DEBUG' ? '' : level.toLowerCase();
+            var containsQ = (searchInput && searchInput.value.trim()) || '';
+            var qs = [];
+            if (levelQ) qs.push('level=' + encodeURIComponent(levelQ));
+            if (containsQ) qs.push('contains=' + encodeURIComponent(containsQ));
+            var base = '/logs/download';
+            if (qs.length) base += '?' + qs.join('&');
+            var a1 = document.getElementById('logs-download');
+            var a2 = document.getElementById('logs-download-json');
+            if (a1) a1.href = base + (qs.length ? '&' : '?') + 'format=text';
+            if (a2) a2.href = base + (qs.length ? '&' : '?') + 'format=json';
+        }
+
+        // rawText для каждой строки, чтобы поиск работал.
+        var appendOrig = append;
+        append = function(e) {
+            appendOrig(e);
+            var last = container.lastElementChild;
+            if (last && last.classList.contains('log-line') && !last.dataset.rawText) {
+                last.dataset.rawText = e.level + ' ' + e.msg;
+                if (!lineMatchesSearch(last.dataset.rawText)) {
+                    last.style.display = 'none';
+                }
+            }
+        };
+
+        updateDownloadLinks();
         showEmptyIfNeeded();
     }
 

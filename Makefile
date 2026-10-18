@@ -109,3 +109,25 @@ dist: clean
 
 help:
 	@echo "Targets: build run test test-race vet fmt tidy lint fetch ci migrate diagnostics clean dist"
+
+# make bump                    # patch: v0.1.0 → v0.1.1
+# make bump bump_part=minor    # minor: v0.1.1 → v0.2.0
+# make bump bump_part=major    # major: v0.2.0 → v1.0.0
+.PHONY: bump
+bump:  ## Создать следующий semver-тег (manual: bump-part=minor|patch|major)
+    @CURRENT=$$(git describe --tags --abbrev=0 2>/dev/null || echo v0.0.0); \
+    PART="$${bump_part:-patch}"; \
+    BASE=$${CURRENT#v}; \
+    MAJOR=$$(echo $$BASE | cut -d. -f1); \
+    MINOR=$$(echo $$BASE | cut -d. -f2); \
+    PATCH=$$(echo $$BASE | cut -d. -f3); \
+    case "$$PART" in \
+        major) MAJOR=$$((MAJOR+1)); MINOR=0; PATCH=0 ;; \
+        minor) MINOR=$$((MINOR+1)); PATCH=0 ;; \
+        patch) PATCH=$$((PATCH+1)) ;; \
+        *) echo "bump_part: major|minor|patch"; exit 1 ;; \
+    esac; \
+    NEXT="v$$MAJOR.$$MINOR.$$PATCH"; \
+    echo "Tag: $$NEXT"; \
+    git tag -a "$$NEXT" -m "Release $$NEXT"; \
+    git push origin "$$NEXT"

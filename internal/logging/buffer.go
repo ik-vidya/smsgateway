@@ -8,6 +8,9 @@ package logging
 
 import (
 	"encoding/json"
+	"fmt"
+	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -187,4 +190,84 @@ func (b *Buffer) Dropped(id int64) int64 {
 		return 0
 	}
 	return s.dropped.Swap(0)
+}
+
+// Filter — фильтр записей лога.
+type Filter struct {
+	MinLevel slog.Level // минимальный уровень (>=)
+	Since    time.Time  // >= (нулевое — без ограничения)
+	Until    time.Time  // <  (нулевое — без ограничения)
+	Contains string     // подстрока в Msg (регистронезависимо)
+}
+
+// SnapshotFiltered возвращает отфильтрованную копию буфера.
+func (b *Buffer) SnapshotFiltered(f Filter) []Entry {
+	b.mu.Lock()
+	all := b.snapshotLocked()
+	b.mu.Unlock()
+
+	needle := strings.ToLower(f.Contains)
+	out := make([]Entry, 0, len(all))
+	for _, e := range all {
+		if e.Level < f.MinLevel {
+			continue
+		}
+		if !f.Since.IsZero() && e.Time.Before(f.Since) {
+			continue
+		}
+		if !f.Until.IsZero() && !e.Time.Before(f.Until) {
+			continue
+		}
+		if needle != "" && !strings.Contains(strings.ToLower(e.Msg), needle) {
+			continue
+		}
+		out = append(out, e)
+	}
+	return out
+}
+
+// Size возвращает ёмкость ring buffer.
+func (b *Buffer) Size() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return len(b.entries)
+}
+
+// Count возвращает число записей (0..Size).
+func (b *Buffer) Count() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.full {
+		return len(b.entries)
+	}
+	return b.pos
+}
+
+// OldestNewest возвращает время самой старой и самой новой записи.
+func (b *Buffer) OldestNewest() (oldest, newest time.Time) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	all := b.snapshotLocked()
+	if len(all) == 0 {
+		return time.Time{}, time.Time{}
+	}
+	return all[0].Time, all[len(all)-1].Time
+}
+
+// Text возвращает запись в формате slog text-handler.
+func (e Entry) Text() string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "time=%s level=%s msg=%q",
+		e.Time.Format(time.RFC3339Nano), e.Level.String(), e.Msg)
+	if len(e.Attrs) > 0 {
+		keys := make([]string, 0, len(e.Attrs))
+		for k := range e.Attrs {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			fmt.Fprintf(&b, " %s=%q", k, e.Attrs[k])
+		}
+	}
+	return b.String()
 }

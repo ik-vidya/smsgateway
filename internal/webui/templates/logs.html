@@ -32,9 +32,41 @@
             <option value="ERROR">{{ T . "logs.level.error" }}</option>
         </select>
     </div>
-    <div class="col-auto text-muted small">
-        {{ T . "logs.hint" }}
+    <div class="col-auto">
+        <input type="text" id="logs-search" class="form-control form-control-sm"
+               style="min-width: 16em;"
+               placeholder="{{ T . "logs.search.placeholder" }}"
+               autocomplete="off">
     </div>
+</div>
+
+<div class="row g-2 align-items-center mb-2 small">
+    <div class="col-auto text-muted">
+        {{ T . "logs.buffer.info" }}
+        <code>{{ .BufferCount }}/{{ .BufferSize }}</code>
+        {{ if .OldestTime }}
+        &middot; {{ T . "logs.buffer.range" }}:
+        <code>{{ fmtTime .OldestTime }}</code>
+        …
+        <code>{{ fmtTime .NewestTime }}</code>
+        {{ end }}
+    </div>
+    <div class="col-auto ms-auto">
+        <a id="logs-download" class="btn btn-sm btn-outline-primary"
+           href="/logs/download?format=text"
+           download>
+            {{ T . "logs.download.text" }}
+        </a>
+        <a id="logs-download-json" class="btn btn-sm btn-outline-primary"
+           href="/logs/download?format=json"
+           download>
+            {{ T . "logs.download.json" }}
+        </a>
+    </div>
+</div>
+
+<div class="alert alert-info py-2 small mb-2">
+    {{ T . "logs.fullhint" }}
 </div>
 
 <div id="logs" data-empty="{{ T . "logs.empty" }}"></div>
