@@ -43,7 +43,15 @@ type URCCDS struct {
 func (u URCCDS) Kind() string    { return "cds" }
 func (u URCCDS) RawLine() string { return u.Raw }
 
-// URCCREG — "+CREG: ..." — изменение регистрации в сети (CS).
+// URCCREG — "+CREG: <stat>[,\"<lac>\",\"<ci>\"]" — изменение
+// регистрации в сети (CS).
+//
+// Формат URC (по 3GPP TS 27.007 §4.2) — одно число <stat>,
+// опционально <lac>/<ci>. Формат ОТВЕТА на AT+CREG? — другое
+// дело: "+CREG: <n>,<stat>[,\"<lac>\",\"<ci>\"]" (два числа
+// перед кавычками). Этот формат сюда НЕ попадает: reader
+// классифицирует его как ответ и кладёт в respCh, где его
+// читает Exec("AT+CREG?").
 type URCCREG struct {
 	Stat int
 	LAC  string
@@ -54,7 +62,12 @@ type URCCREG struct {
 func (u URCCREG) Kind() string    { return "creg" }
 func (u URCCREG) RawLine() string { return u.Raw }
 
-// URCCGREG — "+CGREG: ..." — изменение GPRS-регистрации.
+// URCCGREG — "+CGREG: <stat>[,\"<lac>\",\"<ci>\"[,\"<rac>\"]]" —
+// изменение GPRS-регистрации.
+//
+// Формат URC — как у URCCREG: одно число <stat>. Формат ответа
+// на AT+CGREG? — "+CGREG: <n>,<stat>[...]" — сюда не попадает
+// (см. URCCREG).
 type URCCGREG struct {
 	Stat int
 	LAC  string
@@ -81,7 +94,13 @@ type URCNoCarrier struct {
 func (u URCNoCarrier) Kind() string    { return "no_carrier" }
 func (u URCNoCarrier) RawLine() string { return u.Raw }
 
-// URCCUSD — "+CUSD: ..." — USSD-ответ.
+// URCCUSD — "+CUSD: <m>,\"<r>\",<dcs>" — USSD-ответ.
+//
+// В 3GPP формат URC и ответа на AT+CUSD=1 совпадает, различить
+// регулярным выражением нельзя. Сейчас всегда классифицируется
+// как URC (в коде не используется: ни service, ни probe не
+// вызывают AT+CUSD). Если понадобится — переделать на activeCmd
+// (см. комментарий в transport.go).
 type URCCUSD struct {
 	Stat int
 	Text string
@@ -91,7 +110,13 @@ type URCCUSD struct {
 func (u URCCUSD) Kind() string    { return "cusd" }
 func (u URCCUSD) RawLine() string { return u.Raw }
 
-// URCCBC — "+CBC: ..." — изменение состояния батареи.
+// URCCBC — "+CBC: <bcs>,<bcl>,<voltage>" — состояние батареи.
+//
+// В 3GPP TS 27.007 нет URC для CBC: это всегда ОТВЕТ на AT+CBC.
+// Поэтому reader больше не классифицирует его как URC (см.
+// tryParseURC). Тип сохранён: service.handleURC имеет case на
+// него — если в будущем какой-то модем пришлёт "+CBC:" как URC
+// (некоторые умеют при AT+CBC=1), фикс будет добавлен отдельно.
 type URCCBC struct {
 	Status  int
 	Percent int
@@ -113,12 +138,25 @@ func (u URCRDY) RawLine() string { return u.Raw }
 // ==================== парсеры ====================
 
 var (
-	reCMTI  = regexp.MustCompile(`^\+CMTI:\s*"([^"]*)"\s*,\s*(\d+)`)
-	reCDS   = regexp.MustCompile(`^\+CDS:\s*(\d+)`)
-	reCREG  = regexp.MustCompile(`^\+CREG:\s*(\d+)\s*,\s*(\d+)(?:\s*,\s*"([^"]*)"\s*,\s*"([^"]*)")?`)
-	reCGREG = regexp.MustCompile(`^\+CGREG:\s*(\d+)\s*,\s*(\d+)(?:\s*,\s*"([^"]*)"\s*,\s*"([^"]*)")?`)
-	reCUSD  = regexp.MustCompile(`^\+CUSD:\s*(\d+)\s*,\s*"([^"]*)"`)
-	reCBC   = regexp.MustCompile(`^\+CBC:\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)`)
+	reCMTI = regexp.MustCompile(`^\+CMTI:\s*"([^"]*)"\s*,\s*(\d+)`)
+	reCDS  = regexp.MustCompile(`^\+CDS:\s*(\d+)`)
+
+	// reCREG — только URC-формат: "+CREG: <stat>",
+	// "+CREG: <stat>,\"<lac>\",\"<ci>\"",
+	// "+CREG: <stat>,\"<lac>\",\"<ci>\",\"<act>\"".
+	//
+	// НЕ матчит "+CREG: <n>,<stat>..." — это ответ на AT+CREG?
+	// (два числа перед кавычками). Такой ответ должен уходить
+	// в respCh, где его читает Exec.
+	reCREG = regexp.MustCompile(
+		`^\+CREG:\s*(\d+)\s*(?:,\s*"([^"]*)"\s*,\s*"([^"]*)"(?:\s*,\s*"([^"]*)")?)?\s*$`)
+
+	// reCGREG — аналогично, URC-формат. У CGREG после lac/ci
+	// может быть rac (4G/LTE).
+	reCGREG = regexp.MustCompile(
+		`^\+CGREG:\s*(\d+)\s*(?:,\s*"([^"]*)"\s*,\s*"([^"]*)"(?:\s*,\s*"([^"]*)")?)?\s*$`)
+
+	reCUSD = regexp.MustCompile(`^\+CUSD:\s*(\d+)\s*,\s*"([^"]*)"`)
 )
 
 // parseStandardURC распознаёт стандартные URC.
@@ -149,21 +187,21 @@ func parseStandardURC(line string) (URC, bool) {
 	}
 
 	if m := reCREG.FindStringSubmatch(line); m != nil {
-		stat, _ := strconv.Atoi(m[2])
+		stat, _ := strconv.Atoi(m[1])
 		u := URCCREG{Stat: stat, Raw: line}
-		if len(m) >= 5 {
-			u.LAC = m[3]
-			u.CID = m[4]
+		if m[2] != "" {
+			u.LAC = m[2]
+			u.CID = m[3]
 		}
 		return u, true
 	}
 
 	if m := reCGREG.FindStringSubmatch(line); m != nil {
-		stat, _ := strconv.Atoi(m[2])
+		stat, _ := strconv.Atoi(m[1])
 		u := URCCGREG{Stat: stat, Raw: line}
-		if len(m) >= 5 {
-			u.LAC = m[3]
-			u.CID = m[4]
+		if m[2] != "" {
+			u.LAC = m[2]
+			u.CID = m[3]
 		}
 		return u, true
 	}
@@ -173,12 +211,9 @@ func parseStandardURC(line string) (URC, bool) {
 		return URCCUSD{Stat: stat, Text: m[2], Raw: line}, true
 	}
 
-	if m := reCBC.FindStringSubmatch(line); m != nil {
-		st, _ := strconv.Atoi(m[1])
-		pct, _ := strconv.Atoi(m[2])
-		mv, _ := strconv.Atoi(m[3])
-		return URCCBC{Status: st, Percent: pct, MilliV: mv, Raw: line}, true
-	}
+	// +CBC: не URC (в 3GPP это только ответ на AT+CBC).
+	// Если понадобится поддержать модемы с +CBC URC (AT+CBC=1) —
+	// добавить здесь отдельную ветку.
 
 	return nil, false
 }

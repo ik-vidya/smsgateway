@@ -150,10 +150,13 @@ func TestURCCMTI(t *testing.T) {
 	}
 }
 
+// TestURCCREG — URC +CREG в формате, который присылает модем при
+// AT+CREG=2: "+CREG: <stat>[,\"<lac>\",\"<ci>\"]" (без <n>).
+// Такой URC уходит в urcCh, Exec его не видит.
 func TestURCCREG(t *testing.T) {
 	at, mock := newTestTransport(t)
 	mock.PushResponse("AT+CREG?",
-		`+CREG: 2,5,"00DF","156B"`,
+		`+CREG: 5,"00DF","156B"`, // URC-формат, не ответ
 		"OK",
 	)
 
@@ -169,11 +172,89 @@ func TestURCCREG(t *testing.T) {
 		if !ok {
 			t.Fatalf("не URCCREG: %T", u)
 		}
-		if creg.Stat != 5 || creg.LAC != "00DF" {
+		if creg.Stat != 5 || creg.LAC != "00DF" || creg.CID != "156B" {
 			t.Errorf("CREG=%+v", creg)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("URC не пришёл")
+	}
+}
+
+// TestExecCREGResponse — ответ на AT+CREG? ("+CREG: <n>,<stat>")
+// НЕ должен классифицироваться как URC. Exec его видит, urcCh —
+// пуст.
+//
+// Регрессия: раньше этот ответ уходил в urcCh, и Exec("AT+CREG?")
+// возвращал пустой payload. Из-за этого probe показывал
+// "CREG: —", хотя модем отвечал "+CREG: 2,1,...".
+func TestExecCREGResponse(t *testing.T) {
+	at, mock := newTestTransport(t)
+	mock.PushResponse("AT+CREG?",
+		`+CREG: 2,1,"00DF","156B"`,
+		"OK",
+	)
+
+	urcCh := at.URCs()
+	resp, err := at.Exec(context.Background(), "AT+CREG?")
+	if err != nil {
+		t.Fatalf("Exec: %v", err)
+	}
+	got := resp.String()
+	want := `+CREG: 2,1,"00DF","156B"`
+	if got != want {
+		t.Errorf("Exec payload=%q, ожидалось %q", got, want)
+	}
+
+	// urcCh пуст — этот формат не URC.
+	select {
+	case u := <-urcCh:
+		t.Errorf("неожиданный URC: %T %+v", u, u)
+	case <-time.After(50 * time.Millisecond):
+	}
+}
+
+// TestExecCGREGResponse — симметрично для CGREG.
+func TestExecCGREGResponse(t *testing.T) {
+	at, mock := newTestTransport(t)
+	mock.PushResponse("AT+CGREG?",
+		`+CGREG: 2,1,"00DF","156B"`,
+		"OK",
+	)
+
+	urcCh := at.URCs()
+	resp, err := at.Exec(context.Background(), "AT+CGREG?")
+	if err != nil {
+		t.Fatalf("Exec: %v", err)
+	}
+	got := resp.String()
+	want := `+CGREG: 2,1,"00DF","156B"`
+	if got != want {
+		t.Errorf("Exec payload=%q, ожидалось %q", got, want)
+	}
+	select {
+	case u := <-urcCh:
+		t.Errorf("неожиданный URC: %T %+v", u, u)
+	case <-time.After(50 * time.Millisecond):
+	}
+}
+
+// TestExecCBCResponse — "+CBC:" — всегда ответ, не URC.
+func TestExecCBCResponse(t *testing.T) {
+	at, mock := newTestTransport(t)
+	mock.PushResponse("AT+CBC", "+CBC: 0,100,4411", "OK")
+
+	urcCh := at.URCs()
+	resp, err := at.Exec(context.Background(), "AT+CBC")
+	if err != nil {
+		t.Fatalf("Exec: %v", err)
+	}
+	if got := resp.String(); got != "+CBC: 0,100,4411" {
+		t.Errorf("payload=%q", got)
+	}
+	select {
+	case u := <-urcCh:
+		t.Errorf("неожиданный URC: %T %+v", u, u)
+	case <-time.After(50 * time.Millisecond):
 	}
 }
 
@@ -201,10 +282,12 @@ func TestParseStandardURC(t *testing.T) {
 	}{
 		{`+CMTI: "SM",5`, "cmti"},
 		{`+CDS: 25`, "cds"},
-		{`+CREG: 2,5,"00DF","156B"`, "creg"},
-		{`+CGREG: 2,5,"00DF","156B"`, "cgreg"},
+		// URC-формат CREG/CGREG — одно число <stat>, опционально
+		// "lac"/"ci". НЕ "<n>,<stat>" (это ответ на AT+CREG?).
+		{`+CREG: 5,"00DF","156B"`, "creg"},
+		{`+CREG: 5`, "creg"},
+		{`+CGREG: 5,"00DF","156B"`, "cgreg"},
 		{`+CUSD: 0,"Balance: 10 EUR",15`, "cusd"},
-		{`+CBC: 0,100,4411`, "cbc"},
 		{`RING`, "ring"},
 		{`NO CARRIER`, "no_carrier"},
 		{`RDY`, "rdy"},
@@ -229,6 +312,13 @@ func TestParseNonURC(t *testing.T) {
 		"+CSQ: 17,0",
 		"+CPIN: READY",
 		"ATE0",
+		// Ответ на AT+CREG? — не URC (уходит в respCh).
+		`+CREG: 2,5,"00DF","156B"`,
+		`+CREG: 2,5`,
+		// Ответ на AT+CGREG? — не URC.
+		`+CGREG: 2,5,"00DF","156B"`,
+		// +CBC: — не URC, всегда ответ.
+		"+CBC: 0,100,4411",
 	}
 	for _, line := range cases {
 		if u, ok := parseStandardURC(line); ok {
