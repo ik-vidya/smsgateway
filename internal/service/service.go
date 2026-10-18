@@ -50,10 +50,11 @@ type Service struct {
 	selfNumber     string
 	testSMSTimeout time.Duration
 
-	mu          sync.RWMutex
-	networkStat int
-	lastCSQ     int
-	startTime   time.Time
+	mu              sync.RWMutex
+	networkStat     int
+	gprsNetworkStat int
+	lastCSQ         int
+	startTime       time.Time
 
 	wg sync.WaitGroup
 }
@@ -455,14 +456,34 @@ func (s *Service) handleURC(ctx context.Context, u modem.URC) {
 				"ref", v.Reference, "err", err)
 		}
 	case modem.URCCREG:
+		// Логируем только при изменении stat: SIM800L с
+		// AT+CREG=2 присылает +CREG периодически (обновление
+		// lac/cid от сети) даже без смены stat. Иначе лог
+		// засоряется одной строкой каждые ~30 секунд.
 		s.mu.Lock()
+		changed := s.networkStat != v.Stat
 		s.networkStat = v.Stat
 		s.mu.Unlock()
-		s.logger.Info("service: регистрация",
-			"stat", v.Stat, "lac", v.LAC, "cid", v.CID)
+		if changed {
+			s.logger.Info("service: регистрация (URC)",
+				"stat", v.Stat, "lac", v.LAC, "cid", v.CID)
+		}
 	case modem.URCCGREG:
-		s.logger.Info("service: GPRS-регистрация",
-			"stat", v.Stat, "lac", v.LAC, "cid", v.CID)
+		// Аналогично: логируем только при изменении stat.
+		// lac/cid GPRS в /status не используются, но полезны
+		// в логе при смене соты. Хранить их в Service нет
+		// смысла (нет поля), поэтому логируем только факт
+		// изменения stat.
+		s.mu.RLock()
+		prevGPRS := s.gprsNetworkStat
+		s.mu.RUnlock()
+		if prevGPRS != v.Stat {
+			s.mu.Lock()
+			s.gprsNetworkStat = v.Stat
+			s.mu.Unlock()
+			s.logger.Info("service: GPRS-регистрация (URC)",
+				"stat", v.Stat, "lac", v.LAC, "cid", v.CID)
+		}
 	case modem.URCCBC:
 		s.logger.Debug("service: батарея",
 			"percent", v.Percent, "mv", v.MilliV)
