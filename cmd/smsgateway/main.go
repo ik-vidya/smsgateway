@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/joho/godotenv"
 	"github.com/spf13/cobra"
 
 	"github.com/ik-vidya/smsgateway/internal/api"
@@ -422,6 +423,23 @@ func runService(_ *cobra.Command, _ []string) error {
 
 		// Закрыть ресурсы до exec (defer'ы не сработают).
 		cleanup()
+
+		// Перечитываем .env в os.Environ() ПЕРЕД exec. Иначе
+		// syscall.Exec унаследует os.Environ() родителя, где
+		// SERIAL_PORT и другие — старые значения из первого
+		// запуска. godotenv.Load в новом процессе не перезапишет
+		// их (Load не override), и hot-reload «молча» не
+		// применит изменения из .env.
+		//
+		// Overload здесь — сознательно: пользователь нажал
+		// «Сохранить» в UI, .env должен стать источником истины.
+		// Обычный startup по-прежнему использует Load: env
+		// побеждает .env (systemd EnvironmentFile и т.п.).
+		if flagConfig != "" {
+			if err := godotenv.Overload(flagConfig); err != nil {
+				logger.Warn("SIGHUP: godotenv.Overload", "err", err)
+			}
+		}
 
 		exe, err := os.Executable()
 		if err != nil {
