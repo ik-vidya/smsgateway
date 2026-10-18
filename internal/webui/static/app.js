@@ -1,13 +1,12 @@
 // smsgateway admin UI — клиентские хелперы.
 //
 // /logs — SSE-поток логов.
-// /setup — SSE-поток портов, probe, save и самопроверка.
+// /setup — SSE-поток портов, probe, save, диагностика и отправка+приём.
 (function () {
     'use strict';
 
     initLogs();
     initSetup();
-    initSetupTest();
 
     // ==================== /logs ====================
 
@@ -216,10 +215,6 @@
                 var isActive = (p === activePort);
                 var action;
                 if (isActive) {
-                    // Порт уже открыт сервисом — «Проверить» даст
-                    // 409 (или таймаут, если проверка не сработала).
-                    // Показываем бейдж, чтобы пользователь не жал
-                    // кнопку впустую.
                     action = '<span class="badge bg-secondary">' +
                         escapeHtml(labels.portInUse) + '</span>';
                 } else {
@@ -264,10 +259,7 @@
             if (status !== 200 || (body && body.error)) {
                 result.className = 'alert alert-danger mt-3';
                 var msg = (body && body.error) || 'error';
-                // Машиночитаемый код → перевод. Fallback на
-                // английский текст, если ключа в i18n нет.
-                if (body && body.error_code === 'port_busy' &&
-                    labels.portBusy) {
+                if (body && body.error_code === 'port_busy' && labels.portBusy) {
                     msg = labels.portBusy;
                 }
                 result.innerHTML = '<strong>' + escapeHtml(port) + '</strong>: ' +
@@ -322,9 +314,6 @@
                 result.innerHTML = escapeHtml(labels.saved) + '<br>' +
                     '<small class="text-muted">' +
                     escapeHtml(labels.savingHint) + '</small>';
-                // Через 5 секунд перезагрузить /setup — exec уже
-                // произошёл, страница отрендерится с новым
-                // CurrentPort и кнопкой «Тест».
                 setTimeout(function () {
                     window.location.href = '/setup';
                 }, 5000);
@@ -353,41 +342,7 @@
         };
     }
 
-    // ==================== /setup/test ====================
-
-        // ==================== общее ====================
-
-    function escapeHtml(s) {
-        return String(s)
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;')
-            .replace(/'/g, '&#39;');
-    }
-
-    function formatTime(iso) {
-        try {
-            var d = new Date(iso);
-            if (isNaN(d.getTime())) return iso;
-            var hh = String(d.getHours()).padStart(2, '0');
-            var mm = String(d.getMinutes()).padStart(2, '0');
-            var ss = String(d.getSeconds()).padStart(2, '0');
-            return hh + ':' + mm + ':' + ss;
-        } catch (_) {
-            return iso;
-        }
-    }
-})();
-
-
-// ==================== setup: diagnostics + test-receive ====================
-
-(function () {
-    'use strict';
-
-    initSetupDiagnostics();
-    initSetupTestReceive();
+    // ==================== setup: diagnostics + test-receive ====================
 
     function initSetupDiagnostics() {
         var card = document.getElementById('setup-diag-card');
@@ -595,7 +550,6 @@
 
             var parts = [];
 
-            // Отправка: id, статус, reference (TP-MR от модема).
             var sent = body.sent || {};
             var sentText = labels.sent + ': ' + (sent.status || '?');
             if (sent.id) sentText += ' (id ' + sent.id + ')';
@@ -604,7 +558,6 @@
             if (sent.error) sentText += ' — ' + sent.error;
             parts.push('<div class="mb-2">' + escapeHtml(sentText) + '</div>');
 
-            // Приём: id, текст (содержит маркер), время.
             var cls;
             if (body.received) {
                 var r = body.received;
@@ -634,6 +587,8 @@
         }
     }
 
+    // ==================== общее ====================
+
     function escapeHtml(s) {
         return String(s)
             .replace(/&/g, '&amp;')
@@ -642,4 +597,21 @@
             .replace(/"/g, '&quot;')
             .replace(/'/g, '&#39;');
     }
+
+    function formatTime(iso) {
+        try {
+            var d = new Date(iso);
+            if (isNaN(d.getTime())) return iso;
+            var hh = String(d.getHours()).padStart(2, '0');
+            var mm = String(d.getMinutes()).padStart(2, '0');
+            var ss = String(d.getSeconds()).padStart(2, '0');
+            return hh + ':' + mm + ':' + ss;
+        } catch (_) {
+            return iso;
+        }
+    }
+
+    // Вызовы новых функций.
+    initSetupDiagnostics();
+    initSetupTestReceive();
 })();
