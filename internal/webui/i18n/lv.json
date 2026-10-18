@@ -122,6 +122,7 @@
   "setup.diag.title": "Modema diagnostika",
   "setup.imei": "IMEI",
   "setup.intro": "Pievienojiet modemu USB portam. Tas parādīsies sarakstā zemāk. Nospiediet «Pārbaudīt», pēc tam «Saglabāt un pārstartēt».",
+  "setup.intro_configured": "Modems ir konfigurēts un to izmanto serviss. Pārbaudiet tā stāvokli sadaļās «Modema diagnostika» un «Sūtīšanas + saņemšanas tests» zemāk. Lai mainītu portu, izmantojiet pogas atrasto portu sarakstā.",
   "setup.manufacturer": "Ražotājs",
   "setup.model": "Modelis",
   "setup.port_busy": "Portu izmanto palaists serviss. Izmantojiet «Modema diagnostika» vai «Sūtīšanas + saņemšanas tests».",

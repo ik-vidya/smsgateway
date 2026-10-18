@@ -2,7 +2,11 @@
 <h1>{{ T . "setup.title" }}</h1>
 
 <div class="alert alert-info">
-    {{ T . "setup.intro" }}
+    {{ if .CurrentPort }}
+        {{ T . "setup.intro_configured" }}
+    {{ else }}
+        {{ T . "setup.intro" }}
+    {{ end }}
 </div>
 
 {{ if .CurrentPort }}

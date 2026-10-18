@@ -122,6 +122,7 @@
   "setup.diag.title": "Modem diagnostics",
   "setup.imei": "IMEI",
   "setup.intro": "Plug the modem into a USB port. It will appear in the list below. Click Check to verify that it responds to AT commands, then Save & restart to apply.",
+  "setup.intro_configured": "The modem is configured and in use by the service. Check its state in the «Modem diagnostics» and «Send & receive test» sections below. To change the port, use the buttons in the detected ports list.",
   "setup.manufacturer": "Manufacturer",
   "setup.model": "Model",
   "setup.port_busy": "Port is in use by the running service. Use «Modem diagnostics» or «Send & receive test».",
