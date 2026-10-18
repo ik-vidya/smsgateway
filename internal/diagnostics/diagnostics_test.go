@@ -213,3 +213,63 @@ func TestParseStorage(t *testing.T) {
 		t.Errorf("Storage.Used=%d Total=%d", got.Used, got.Total)
 	}
 }
+
+// TestParseSMSCUCS2 — SIM800L при CSCS=UCS2 отдаёт SMSC
+// в виде hex UCS-2 (UTF-16BE): "002B0033003700320035003500300039..."
+// = "+3725509911". До фикса parseSMSC возвращал исходный hex,
+// потому что байты идут с NUL между символами, и isPrintable
+// на ASCII-декодировании возвращал false.
+func TestParseSMSCUCS2(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+	}{
+		// +3725509911 в UCS-2 hex.
+		{`+CSCA: "002B0033003700320035003500300039003900310031",145`,
+			"+3725509911"},
+		// +37121234567 в UCS-2 hex.
+		// 12 символов × 4 hex = 48 hex-символов,
+		// чётная длина. Раньше в этой строке был лишний
+		// "00" в конце (50 hex, 25 байт) — decodeUCS2BE
+		// возвращал false, parseSMSC отдавал hex, тест падал.
+		{`+CSCA: "002B00330037003100320031003200330034003500360037",145`,
+			"+37121234567"},
+	}
+	for _, c := range cases {
+		got := parseSMSC(c.in)
+		if got != c.want {
+			t.Errorf("parseSMSC(%q)=%q, ожидалось %q", c.in, got, c.want)
+		}
+	}
+}
+
+// TestParseSMSCUCS2OddLength — регрессия: нечётная длина
+// hex. decodeUCS2BE возвращает false, parseSMSC отдаёт
+// исходный hex (не паникует).
+func TestParseSMSCUCS2OddLength(t *testing.T) {
+	// 25 байт (50 hex) — нечётная длина, невалидный UCS-2.
+	in := `+CSCA: "002B0033003700310032003100320033003400350036003700",145`
+	got := parseSMSC(in)
+	want := "002B0033003700310032003100320033003400350036003700"
+	if got != want {
+		t.Errorf("parseSMSC(%q)=%q, ожидалось %q "+
+			"(невалидный UCS-2 → исходный hex)", in, got, want)
+	}
+}
+
+// TestParseSMSCAscii — ASCII-hex (когда CSCS не UCS2).
+func TestParseSMSCAscii(t *testing.T) {
+	// "2B33373235353039393131" = "+3725509911" в ASCII.
+	in := `+CSCA: "2B33373235353039393131",145`
+	if got := parseSMSC(in); got != "+3725509911" {
+		t.Errorf("parseSMSC(%q)=%q", in, got)
+	}
+}
+
+// TestParseSMSCPlain — CSCS=GSM, номер как есть.
+func TestParseSMSCPlain(t *testing.T) {
+	in := `+CSCA: "+3725509911",145`
+	if got := parseSMSC(in); got != "+3725509911" {
+		t.Errorf("parseSMSC(%q)=%q", in, got)
+	}
+}

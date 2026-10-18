@@ -206,19 +206,91 @@ func parseOperator(resp string) OperatorInfo {
 
 var reCSCA = regexp.MustCompile(`\+CSCA:\s*"([^"]*)"`)
 
+// parseSMSC разбирает +CSCA? и декодирует номер SMSC.
+//
+// Формат ответа зависит от AT+CSCS:
+//   - при CSCS="GSM" или "IRA" — ASCII-строка (номер как есть);
+//   - при CSCS="UCS2" (SIM800L-профиль это устанавливает) —
+//     hex UCS-2: "002B0033003700320035..." (UTF-16BE по
+//     байтам, каждый символ — 4 hex-цифры с ведущими 00
+//     для BMP).
+//
+// Алгоритм:
+//  1. Если строка не hex — вернуть как есть (это уже номер).
+//  2. Попробовать декодировать как ASCII-hex (для GSM/IRA
+//     номеров в hex, если встретится).
+//  3. Попробовать декодировать как UCS-2 (UTF-16BE) —
+//     основной путь для SIM800L.
+//  4. Если ни один вариант не даёт печатной строки — вернуть
+//     исходный hex (пусть пользователь сам разбирается).
 func parseSMSC(resp string) string {
 	m := reCSCA.FindStringSubmatch(resp)
 	if len(m) < 2 {
 		return ""
 	}
 	s := m[1]
-	if b, err := hex.DecodeString(s); err == nil {
-		out := string(b)
-		if isPrintable(out) {
-			return out
+	if s == "" {
+		return ""
+	}
+
+	// 1. Не hex — возвращаем как есть.
+	if !looksLikeHex(s) {
+		return s
+	}
+
+	b, err := hex.DecodeString(s)
+	if err != nil {
+		return s
+	}
+
+	// 2. ASCII: "2B333732..." → "+3725509911".
+	if ascii := string(b); isPrintable(ascii) {
+		return ascii
+	}
+
+	// 3. UCS-2 (UTF-16BE): "002B0033..." → "+3725509911".
+	if len(b)%2 == 0 {
+		if ucs2, ok := decodeUCS2BE(b); ok && isPrintable(ucs2) {
+			return ucs2
 		}
 	}
+
 	return s
+}
+
+// looksLikeHex — непустая строка чётной длины, все символы hex.
+func looksLikeHex(s string) bool {
+	if len(s) == 0 || len(s)%2 != 0 {
+		return false
+	}
+	for _, r := range s {
+		if !((r >= '0' && r <= '9') ||
+			(r >= 'A' && r <= 'F') ||
+			(r >= 'a' && r <= 'f')) {
+			return false
+		}
+	}
+	return true
+}
+
+// decodeUCS2BE декодирует байты как UTF-16BE.
+// Возвращает (строка, true) при успехе; ("", false) если
+// байты не складываются в валидные руны.
+func decodeUCS2BE(b []byte) (string, bool) {
+	if len(b)%2 != 0 {
+		return "", false
+	}
+	var sb strings.Builder
+	for i := 0; i < len(b); i += 2 {
+		u := uint16(b[i])<<8 | uint16(b[i+1])
+		// Суррогатные пары (D800-DBFF + DC00-DFFF) не
+		// поддерживаем — для номеров SMSC они не нужны.
+		if u >= 0xD800 && u <= 0xDFFF {
+			return "", false
+		}
+		sb.WriteRune(rune(u))
+	}
+	return sb.String(), true
 }
 
 func isPrintable(s string) bool {

@@ -119,7 +119,7 @@ func Load(path string) (*Config, error) {
 	if c.SMSRetention, err = envDuration("SMS_RETENTION", 0); err != nil {
 		return nil, err
 	}
-	if c.TestSMSTimeout, err = envDuration("TEST_SMS_TIMEOUT", 30*time.Second); err != nil {
+	if c.TestSMSTimeout, err = envDuration("TEST_SMS_TIMEOUT", 120*time.Second); err != nil {
 		return nil, err
 	}
 	if c.GammuWatchInterval, err = envDuration("GAMMU_WATCH_INTERVAL", 5*time.Second); err != nil {
