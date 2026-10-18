@@ -58,6 +58,23 @@ type Service struct {
 	startTime       time.Time
 
 	wg sync.WaitGroup
+
+	fatalErrMu sync.Mutex
+	fatalErr   error
+}
+
+func (s *Service) setFatalErr(err error) {
+	s.fatalErrMu.Lock()
+	defer s.fatalErrMu.Unlock()
+	if s.fatalErr == nil {
+		s.fatalErr = err
+	}
+}
+
+func (s *Service) getFatalErr() error {
+	s.fatalErrMu.Lock()
+	defer s.fatalErrMu.Unlock()
+	return s.fatalErr
 }
 
 // Modem — интерфейс модема, используемый сервисом.
@@ -156,8 +173,11 @@ func (s *Service) Run(ctx context.Context) error {
 		s.recoverGammuOrphans(ctx)
 	}
 
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	s.wg.Add(4)
-	go s.urcLoop(ctx)
+	go s.urcLoop(ctx, cancel)
 	go s.sendLoop(ctx)
 	go s.pendingLoop(ctx)
 	go s.networkLoop(ctx)
@@ -181,7 +201,7 @@ func (s *Service) Run(ctx context.Context) error {
 	case <-time.After(10 * time.Second):
 		s.logger.Warn("service: таймаут ожидания горутин")
 	}
-	return nil
+	return s.getFatalErr()
 }
 
 // gammuLoop запускает watcher gammu.Manager и ждёт его завершения
@@ -416,7 +436,7 @@ func (s *Service) RunDiagnostics(ctx context.Context) (diagnostics.Result, error
 
 // ==================== URC-цикл ====================
 
-func (s *Service) urcLoop(ctx context.Context) {
+func (s *Service) urcLoop(ctx context.Context, cancel context.CancelFunc) {
 	defer s.wg.Done()
 	s.logger.Info("service: URC-цикл запущен")
 
@@ -428,7 +448,9 @@ func (s *Service) urcLoop(ctx context.Context) {
 			return
 		case u, ok := <-urcCh:
 			if !ok {
-				s.logger.Info("service: URC-канал закрыт")
+				s.logger.Error("service: URC-канал закрыт (модем отключен)")
+				s.setFatalErr(fmt.Errorf("URC канал закрыт (модем отключен)"))
+				cancel()
 				return
 			}
 			s.handleURC(ctx, u)
