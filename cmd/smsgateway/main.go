@@ -464,7 +464,34 @@ func runService(_ *cobra.Command, _ []string) error {
 		}
 	case err := <-svcErr:
 		if err != nil {
-			return fmt.Errorf("service: %w", err)
+			notifier.Notify(ctx, notify.LevelCritical, err)
+			logger.Error("service: критическая ошибка, перезапуск через 3с", "err", err)
+
+			shutdownCtx, shutdownCancel := context.WithTimeout(
+				context.Background(), 10*time.Second)
+			if err := apiServer.Shutdown(shutdownCtx); err != nil {
+				logger.Error("shutdown api", "err", err)
+			}
+			if webServer != nil {
+				if err := webServer.Shutdown(shutdownCtx); err != nil {
+					logger.Error("shutdown web ui", "err", err)
+				}
+			}
+			shutdownCancel()
+
+			cleanup()
+
+			exe, errExe := os.Executable()
+			if errExe != nil {
+				exe = "/proc/self/exe"
+			}
+			time.Sleep(3 * time.Second)
+			logger.Info("exec", "exe", exe, "args", os.Args)
+			if errExec := syscall.Exec(exe, os.Args, os.Environ()); errExec != nil {
+				logger.Error("syscall.Exec", "err", errExec)
+				return fmt.Errorf("syscall.Exec: %w", errExec)
+			}
+			return nil
 		}
 	}
 
