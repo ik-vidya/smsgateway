@@ -297,6 +297,16 @@ func (a *ATTransport) readerLoop() {
 			return
 		}
 		if n == 0 {
+			// Некоторые USB-UART драйверы (CH340/CH341 после
+			// физического отключения устройства) возвращают
+			// (0, nil) без блокировки. Без sleep это busy loop
+			// (100% CPU). Для живого порта Read сразу вернёт
+			// данные, sleep не понадобится.
+			select {
+			case <-a.ctx.Done():
+				return
+			case <-time.After(10 * time.Millisecond):
+			}
 			continue
 		}
 
