@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -145,7 +146,12 @@ func (s *Server) handleSetupProbe(w http.ResponseWriter, r *http.Request) {
 	// гарантированный таймаут 3s. Подсказываем, что делать
 	// вместо этого: диагностика и тест «отправка + приём» идут
 	// через сервис и работают при занятом порте.
-	if req.Port == s.cfg.SerialPort {
+	// Резолвим симлинки: UI показывает /dev/serial/by-id/..., а
+	// в .env обычно SERIAL_PORT=/dev/ttyUSB0. Это один и тот же
+	// порт. Сравнивать строки бесполезно.
+	reqReal, errReq := filepath.EvalSymlinks(req.Port)
+	cfgReal, errCfg := filepath.EvalSymlinks(s.cfg.SerialPort)
+	if errReq == nil && errCfg == nil && reqReal == cfgReal {
 		writeSetupErr(w, http.StatusConflict,
 			"port is in use by the running service; "+
 				"use diagnostics or send/receive test instead")
