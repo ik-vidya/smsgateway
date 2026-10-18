@@ -350,3 +350,62 @@ func TestCollectInvalidIMEIWarning(t *testing.T) {
 		t.Error("нет warning в Raw для невалидного IMEI")
 	}
 }
+
+// TestParseCREGEmpty — пустой ответ AT+CREG? (таймаут)
+// даёт RegInfo с Error, а не «молчаливый» {status:0}.
+func TestParseCREGEmpty(t *testing.T) {
+	r := parseCREG("")
+	if r.Status != 0 {
+		t.Errorf("Status=%d, ожидалось 0", r.Status)
+	}
+	if r.Error != "no response (timeout or modem busy)" {
+		t.Errorf("Error=%q", r.Error)
+	}
+}
+
+// TestParseSignalEmpty — пустой ответ AT+CSQ.
+func TestParseSignalEmpty(t *testing.T) {
+	s := parseSignal("")
+	if s.Error != "no response (timeout or modem busy)" {
+		t.Errorf("Error=%q", s.Error)
+	}
+}
+
+// TestParseOperatorEmpty — пустой ответ AT+COPS?.
+func TestParseOperatorEmpty(t *testing.T) {
+	o := parseOperator("")
+	if o.Error != "no response (timeout or modem busy)" {
+		t.Errorf("Error=%q", o.Error)
+	}
+}
+
+// TestParseStorageEmpty — пустой ответ AT+CPMS?.
+func TestParseStorageEmpty(t *testing.T) {
+	s := parseStorage("")
+	if s.Error != "no response (timeout or modem busy)" {
+		t.Errorf("Error=%q", s.Error)
+	}
+}
+
+// TestParseCREGUnparsable — ответ есть, но не парсится.
+func TestParseCREGUnparsable(t *testing.T) {
+	r := parseCREG("+CREG: 0") // без ,<stat>
+	if r.Error == "" {
+		t.Error("ожидался Error для непарсибельного ответа")
+	}
+	if r.Status != 0 {
+		t.Errorf("Status=%d, ожидалось 0", r.Status)
+	}
+}
+
+// TestParseCREGValidNoError — валидный ответ не выставляет
+// Error.
+func TestParseCREGValidNoError(t *testing.T) {
+	r := parseCREG(`+CREG: 2,5,"00DC","04ED"`)
+	if r.Error != "" {
+		t.Errorf("Error=%q, ожидалось пусто", r.Error)
+	}
+	if r.Status != 5 {
+		t.Errorf("Status=%d, ожидалось 5", r.Status)
+	}
+}

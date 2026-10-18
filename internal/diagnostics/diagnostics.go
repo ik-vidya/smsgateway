@@ -55,33 +55,54 @@ type Result struct {
 }
 
 // SignalInfo — качество сигнала.
+//
+// Error заполняется, если AT+CSQ не ответил или ответ не
+// парсится. В этом случае RSSI=0, DBM=0 — это НЕ «нет
+// сигнала» и НЕ «0 dBm», а «состояние неизвестно».
 type SignalInfo struct {
 	RSSI    int    `json:"rssi"`
 	BER     int    `json:"ber"`
 	DBM     int    `json:"dbm"`
 	Quality string `json:"quality,omitempty"`
+	Error   string `json:"error,omitempty"`
 }
 
 // RegInfo — статус регистрации (CREG/CGREG).
+//
+// Error заполняется, если команда не ответила (таймаут,
+// модем занят) или ответ не парсится. В этом случае
+// Status=0 — это НЕ «модем не зарегистрирован», а
+// «состояние неизвестно». Для актуального статуса
+// используйте /api/v1/status (кеш networkLoop) или
+// ?raw=1 в diagnostics.
 type RegInfo struct {
 	Status int    `json:"status"`
 	Text   string `json:"text,omitempty"`
 	LAC    string `json:"lac,omitempty"`
 	CID    string `json:"cid,omitempty"`
+	Error  string `json:"error,omitempty"`
 }
 
 // OperatorInfo — информация об операторе.
+//
+// Error заполняется, если AT+COPS? не ответил.
 type OperatorInfo struct {
-	Name string `json:"name,omitempty"`
-	Code string `json:"code,omitempty"`
+	Name  string `json:"name,omitempty"`
+	Code  string `json:"code,omitempty"`
+	Error string `json:"error,omitempty"`
 }
 
 // StorageInfo — состояние хранилища SMS.
+//
+// Error заполняется, если AT+CPMS? не ответил. В этом
+// случае Used=0, Total=0 — это НЕ «хранилище пустое и
+// размер 0», а «состояние неизвестно».
 type StorageInfo struct {
 	Read  string `json:"read,omitempty"`
 	Write string `json:"write,omitempty"`
 	Used  int    `json:"used"`
 	Total int    `json:"total"`
+	Error string `json:"error,omitempty"`
 }
 
 // Collect собирает диагностику.
@@ -176,6 +197,25 @@ func trim(s string) string {
 	return ""
 }
 
+// describeEmptyResponse возвращает человекочитаемое
+// описание проблемы для Raw-ответа: пустой ответ, ERROR,
+// или непарсибельный текст.
+func describeEmptyResponse(resp string) string {
+	if resp == "" {
+		return "no response (timeout or modem busy)"
+	}
+	if strings.HasPrefix(resp, "ERROR") ||
+		strings.HasPrefix(resp, "+CME ERROR") ||
+		strings.HasPrefix(resp, "+CMS ERROR") {
+		return resp
+	}
+	t := trim(resp)
+	if len(t) > 100 {
+		t = t[:100] + "…"
+	}
+	return "unparsable: " + t
+}
+
 // ==================== парсеры ====================
 
 func parseSIMStatus(resp string) string {
@@ -191,7 +231,7 @@ var reCSQ = regexp.MustCompile(`\+CSQ:\s*(\d+)\s*,\s*(\d+)`)
 func parseSignal(resp string) SignalInfo {
 	m := reCSQ.FindStringSubmatch(resp)
 	if len(m) < 3 {
-		return SignalInfo{}
+		return SignalInfo{Error: describeEmptyResponse(resp)}
 	}
 	rssi, _ := strconv.Atoi(m[1])
 	ber, _ := strconv.Atoi(m[2])
@@ -221,7 +261,7 @@ var reCREG = regexp.MustCompile(`\+C(?:G)?REG:\s*\d+\s*,\s*(\d+)(?:\s*,\s*"([^"]
 func parseCREG(resp string) RegInfo {
 	m := reCREG.FindStringSubmatch(resp)
 	if len(m) < 2 {
-		return RegInfo{}
+		return RegInfo{Error: describeEmptyResponse(resp)}
 	}
 	stat, _ := strconv.Atoi(m[1])
 	info := RegInfo{
@@ -258,7 +298,7 @@ var reCOPS = regexp.MustCompile(`\+COPS:\s*\d+\s*,\s*(\d+)\s*,\s*"([^"]*)"`)
 func parseOperator(resp string) OperatorInfo {
 	m := reCOPS.FindStringSubmatch(resp)
 	if len(m) < 3 {
-		return OperatorInfo{}
+		return OperatorInfo{Error: describeEmptyResponse(resp)}
 	}
 	format, _ := strconv.Atoi(m[1])
 	val := m[2]
@@ -377,7 +417,7 @@ var reCPMS = regexp.MustCompile(
 func parseStorage(resp string) StorageInfo {
 	m := reCPMS.FindStringSubmatch(resp)
 	if len(m) < 10 {
-		return StorageInfo{}
+		return StorageInfo{Error: describeEmptyResponse(resp)}
 	}
 	used, _ := strconv.Atoi(m[2])
 	total, _ := strconv.Atoi(m[3])
