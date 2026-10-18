@@ -82,6 +82,15 @@ GOWORK=off go test ./... -timeout 60s
 set -euo pipefail
 cd /mnt/Data-work/Projects/go-projects/go-smsd/smsgateway
 
+# 0. Дерево должно быть чистым (иначе git add -A в шаге 4
+#    подхватит посторонние M/??, как это уже было в 0b18fe4).
+if [ -n "$(git status --short)" ]; then
+    echo "WARNING: дерево не чистое:"
+    git status --short
+    echo "Сделайте git stash или отдельный коммит, потом повторите."
+    exit 1
+fi
+
 # 1. Применить изменения.
 python3 apply-XXX.py
 
@@ -98,13 +107,6 @@ GOWORK=off go vet ./...
 GOWORK=off go test ./... -timeout 60s
 
 # 4. Commit — только если пре-чек прошёл.
-#    ВНИМАНИЕ: git add -A захватывает ВСЕ изменения в дереве,
-#    включая посторонние M/??. Перед запуском обёртки дерево
-#    должно быть чистым (кроме того, что меняет apply-*.py);
-#    иначе посторонние правки уедут в коммит с чужим сообщением
-#    (уже случалось: 0b18fe4 — вместе с probe-фиксом уехали
-#    PROMPT.md, .gitignore, setup_test.go). Проверяйте
-#    `git status --short` перед запуском.
 git add -A
 git commit -m "$(cat <<'EOF'
 <тема>
@@ -140,6 +142,11 @@ git push
 name` на «строке 0». Правильно — `#!/bin/bash` и `set -euo
 pipefail` **отдельной строкой**.
 
+**Шаг 0 (чистота дерева).** Не косметика: `git add -A` в шаге 4
+захватывает всё дерево. Уже случалось (`0b18fe4`): вместе с
+probe-фиксом в коммит уехали `PROMPT.md`, `.gitignore`,
+`setup_test.go` под чужим сообщением. Шаг 0 — защита.
+
 **Почему именно такой порядок:**
 
 - `gofmt -s -w .` до commit → `make build`'s `gofmt` не найдёт
@@ -156,10 +163,6 @@ pipefail` **отдельной строкой**.
   случая, когда `tidy` или `fmt` внутри `make build` неожиданно
   изменили файл (например, обновили `go.sum`). Auto-amend
   гарантирует, что `version` в артефакте совпадает с SHA коммита.
-- `git add -A` в шаге 4 — захватывает всё дерево. Если в нём
-  есть посторонние `M`/`??`, они уедут в коммит. Перед запуском
-  обёртки — `git status --short` и либо отдельный коммит, либо
-  `git stash`.
 
 **Что НЕ делать:**
 
@@ -192,7 +195,7 @@ pipefail` **отдельной строкой**.
 | `internal/config` | `.env`, валидация, `envwrite` (правка `.env`), `ParseDuration` | 20+ |
 | `internal/logging` | `slog` + ring buffer (1000) + pub/sub для SSE + `Filter`/`SnapshotFiltered`/`Entry.Text` | 20+ |
 | `internal/storage` | SQLite (`modernc.org/sqlite`, без CGO), миграции, CRUD, retention | 14+ |
-| `internal/modem` | AT-транспорт (reader, URC-канал), `SendSMS` (PDU), `ReadSMS`, PIN-unlock, `discover` (порты/модемы) | 50+ |
+| `internal/modem` | AT-транспорт (reader, URC-канал), `SendSMS` (PDU), `ReadSMS`, PIN-unlock, `discover` (порты/модемы); CREG/CGREG/CBC — ответы, не URC | 53+ |
 | `internal/profiles` | `generic`, `sim800`, `quectel`, `telit`, `huawei`; `Get()` case-insensitive, `Auto()` | 5 |
 | `internal/diagnostics` | `Collect()` — опрос AT, `Error` + `CachedStatus`/`CachedRSSI` при таймауте | 20+ |
 | `internal/probe` | Опрос модема + генерация скелета профиля; `--creg-timeout` для CREG/CGREG | 14 |
@@ -217,30 +220,29 @@ linux/arm64, linux/armv7, windows/amd64).
 2. **Профили `quectel`/`telit`** — только заглушки `Generic`. Ждут
    реального железа.
 3. **Команда `probe` для автогенерации профиля** — реализована
-   и проверена на живом SIM800L (2026-10-18): профиль `sim800`
-   определяется автоматически, все четыре обхода
-   (`ForceUCS2ForAllSMS`, `UseCSMPForSRR`, `AlignReadStorage`,
-   `PinAttemptsAT`) подтверждены. На других модемах (Quectel,
-   Telit, Huawei) автогенерация не проверялась.
+   и проверена на двух живых модемах SIM800L (2026-10-18):
+   профиль `sim800` определяется автоматически, все четыре
+   обхода (`ForceUCS2ForAllSMS`, `UseCSMPForSRR`,
+   `AlignReadStorage`, `PinAttemptsAT`) подтверждены. На других
+   модемах (Quectel, Telit, Huawei) автогенерация не проверялась.
 4. **`AT+CREG=1` вместо `=2`** — обсуждалось, но не сделано (URC
    `+CREG` приходят часто, залогировано только изменение `stat`).
 5. **`make deploy`** — target есть (в вашем локальном `Makefile`), в
    CI не проверяется.
-6. **Fallback на `AT+COPS?` при таймауте CREG в `service/network.go`**
-   — обсуждалось, не сделано. В `probe` CREG/CGREG идут с
-   `--creg-timeout` (10s), но `networkLoop` по-прежнему с 5s.
+6. **Тестирование модема из Web UI** — обсуждалось. Расширить
+   `/setup` блоками «Диагностика» (из `diagnostics.Collect`) и
+   «Входящие» (`ReadSMS(unread)`) — полезно. Сырые AT-команды —
+   **не делать** (риск сломать модем). Пока не реализовано.
 
 ---
 
 ## 5. Известные подводные камни
 
-- **SIM800L в роуминге 2G Латвии** — работает, `stat=5`, но
-  `AT+CREG?`/`AT+CGREG?` иногда таймаутят (5s). `/diagnostics`
-  возвращает `Error` + `CachedStatus` (из `networkLoop`).
-  `networkLoop` опрашивает раз в 30s. В `probe` есть отдельный
-  `--creg-timeout` (default 10s) — с ним CREG обычно успевает
-  ответить; в `service/network.go` таймаут пока 5s (фикс не
-  сделан, fallback на `AT+COPS?` не реализован).
+- **SIM800L в 2G.** Два живых модема на 2026-10-18: один в
+  роуминге (`CREG stat=5`), другой местный (`stat=1`). Оба
+  работают. После фикса роутинга `+CREG`/`+CGREG` (см. §8)
+  `AT+CREG?`/`AT+CGREG?` стабильно отвечают, `networkLoop`
+  обновляет `networkStat` через оба пути (URC + опрос).
 - **DR приходит через 60–90 секунд** после `+CMGS`. `TEST_SMS_TIMEOUT`
   по умолчанию **120s**. `api-test.sh` считает `sent` успехом
   (DR может прийти позже).
@@ -259,9 +261,8 @@ linux/arm64, linux/armv7, windows/amd64).
   пробует ASCII-hex, затем UTF-16BE, затем возвращает исходное.
 - **`git add -A` в обёртке** — захватывает все `M`/`??` в дереве.
   Уже случалось: `0b18fe4` уехал с `PROMPT.md`, `.gitignore`,
-  `setup_test.go` под сообщением «probe: …». Перед запуском
-  обёртки — `git status --short` и либо отдельный коммит, либо
-  `git stash`.
+  `setup_test.go` под сообщением «probe: …». Защита — шаг 0 в
+  обёртке (`git status --short` → стоп).
 - **`#!/bin/bash -euo pipefail`** — не работает: ядро передаёт
   `-euo pipefail` как один аргумент → `invalid parameter name`
   на «строке 0». Только `#!/bin/bash` + `set -euo pipefail`
@@ -269,18 +270,28 @@ linux/arm64, linux/armv7, windows/amd64).
 - **Вложенные разделители в блоке кода** — `~~~markdown` с
   `~~~bash` внутри ломает копирование файла целиком. Внешний
   разделитель не должен встречаться в содержимом.
+- **`probe` не вызывает `Modem.Init`** — поэтому `CSCS: "IRA"`
+  и `CPMS: "ME",…` в отчёте — это сырое состояние модема.
+  `PreInitHook` профиля (CSCS=UCS2, CPMS="SM","SM","SM")
+  сработает при старте сервиса. Не пугаться.
 
 ---
 
 ## 6. Проверка на живом модеме
 
-Модем SIM800L (`Revision:1418B04SIM800L24`) на **другой машине**
-(`rsmodule-tallin1`, 192.168.199.65:8085 API / 8086 Web UI).
-В текущем окружении его нет — все тесты на mock-модемах.
+Два модема SIM800L (`Revision:1418B04SIM800L24`):
+- местный — `CREG stat=1`;
+- в роуминге 2G Латвии — `CREG stat=5`.
 
-`probe` проверен на живом SIM800L (2026-10-18): `profiles.Auto()`
-вернул `sim800`, все четыре обхода подтверждены, `--creg-timeout`
-(10s) убирает таймаут CREG/CGREG.
+Оба — на **другой машине** (`rsmodule-tallin1`,
+192.168.199.65:8085 API / 8086 Web UI). В текущем окружении
+модемов нет — все unit-тесты на mock-модемах.
+
+**Отправка SMS проверена** на живом модеме (2026-10-18):
+`sendLoop` → `AT+CMGS` → `+CMGS: <ref>` → `+CDS` (DR) — работает
+end-to-end. `probe` проверен на двух модемах: `Auto()` вернул
+`sim800`, все четыре обхода подтверждены, `--creg-timeout`
+(10s) и фикс роутинга `+CREG`/`+CGREG` убирают потерю ответов.
 
 Если задача требует проверки на железе — пользователь выполнит
 сам. Готовый тестовый скрипт — `test-tallin1.sh` в корне (три
@@ -362,7 +373,21 @@ curl -s -H "X-API-Key: $KEY" \
   `set -euo pipefail` отдельной строкой.
 - **`git add -A` при грязном дереве** — посторонние правки уедут
   в коммит с чужим сообщением (уже случалось: `0b18fe4`).
-  Перед запуском обёртки — `git status --short`.
+  Защита — шаг 0 в обёртке.
+- **Регекспы CREG/CGREG матчили ответ на AT+CREG?, а не URC.**
+  По 3GPP TS 27.007 ответ на AT+CREG? — `+CREG: <n>,<stat>`
+  (два числа перед кавычками), URC — `+CREG: <stat>` (одно
+  число). Регексп `^\+CREG:\s*(\d+)\s*,\s*(\d+)` матчил только
+  ответ, поэтому: (а) ответ на `Exec("AT+CREG?")` попадал в
+  `urcCh` и терялся; (б) настоящий URC уходил в `respCh` и
+  выбрасывался `drain'ом` перед следующей командой. Побочно:
+  `+CBC` (в 3GPP никогда не URC) тоже терялся. Симптом:
+  `probe` показывает `CREG: —`, `CBC: — (нет)`, при этом
+  `COPS` знает оператора. Фикс — в `internal/modem/urc.go`:
+  `reCREG`/`reCGREG` матчат URC-формат, `+CBC` убран из
+  `tryParseURC` (тип `URCCBC` сохранён для будущего).
+  Регрессионные тесты: `TestExecCREGResponse`,
+  `TestExecCGREGResponse`, `TestExecCBCResponse`.
 - **Вложенные разделители в блоке** — `~~~markdown` с `~~~bash`
   внутри ломает копирование. Внешний разделитель не должен
   встречаться в содержимом.
@@ -381,7 +406,9 @@ curl -s -H "X-API-Key: $KEY" \
 - CI на GitHub Actions: `go mod download`, `go vet`, `go test`,
   build без CGO, cross-compile (linux/amd64, linux/arm64,
   linux/armv7, windows/amd64).
-- Модем SIM800L на удалённой машине (не в текущем окружении).
+- Два модема SIM800L на удалённой машине (не в текущем
+  окружении): один местный (`stat=1`), один в роуминге
+  (`stat=5`).
 
 ---
 
@@ -390,5 +417,6 @@ curl -s -H "X-API-Key: $KEY" \
 Semver через git-теги. `git describe --tags --always --dirty`
 поддерживается `Makefile` (`VERSION`). Текущий тег — `v0.1.0`.
 
-Порядок `make build` (после `commit`, до `push`) и требования к
-shebang — см. раздел 2 «Обёртка для Python-скрипта».
+Порядок `make build` (после `commit`, до `push`), шаг 0 (чистота
+дерева) и требования к shebang — см. раздел 2 «Обёртка для
+Python-скрипта».
