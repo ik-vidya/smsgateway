@@ -410,7 +410,10 @@ func (a *ATTransport) tryParseURC(line string) (URC, bool) {
 func (a *ATTransport) drainRespCh() {
 	for {
 		select {
-		case <-a.respCh:
+		case _, ok := <-a.respCh:
+			if !ok {
+				return
+			}
 		default:
 			return
 		}
