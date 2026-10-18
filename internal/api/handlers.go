@@ -109,8 +109,10 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := StatusResponse{
-		Status:   "ok",
-		Messages: msgCounts,
+		Status:    "ok",
+		Version:   s.version,
+		BuildTime: s.buildTime,
+		Messages:  msgCounts,
 		Database: &DBStatus{
 			Path:    s.cfg.DBPath,
 			Healthy: true,
@@ -352,6 +354,24 @@ func (s *Server) handleDiagnostics(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError,
 			CodeInternalError, err.Error())
 		return
+	}
+
+	// Обогащаем результат кешем из service, если live-запрос
+	// упал. Пользователь видит и ошибку («no response»), и
+	// кеш (последнее известное состояние из networkLoop).
+	if s.svc != nil {
+		if res.Registration.Error != "" {
+			if st := s.svc.NetworkStatus(); st != 0 {
+				res.Registration.CachedStatus = st
+				res.Registration.CachedText = networkStatusText(st)
+			}
+		}
+		if res.Signal.Error != "" {
+			if csq := s.svc.LastCSQ(); csq > 0 && csq <= 31 {
+				res.Signal.CachedRSSI = csq
+				res.Signal.CachedDBM = -113 + 2*csq
+			}
+		}
 	}
 
 	// По умолчанию raw скрываем — там могут быть IMEI/IMSI/номера.

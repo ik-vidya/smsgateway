@@ -37,7 +37,8 @@ func newTestServer(t *testing.T) *Server {
 		LogFormat:    "text",
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	return New(cfg, store, nil, nil, logger)
+	return New(cfg, store, nil, nil, logger,
+		"test-version", "test-build-time")
 }
 
 func doRequest(t *testing.T, s *Server, method, path string, body any, auth string) *httptest.ResponseRecorder {

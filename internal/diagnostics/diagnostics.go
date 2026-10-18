@@ -27,8 +27,8 @@ import (
 //
 // Теперь: 2s на команду, 15s на весь опрос.
 const (
-	diagPerCmdTimeout = 2 * time.Second
-	diagTotalTimeout  = 15 * time.Second
+	diagPerCmdTimeout = 5 * time.Second
+	diagTotalTimeout  = 25 * time.Second
 )
 
 // Modem — минимальный интерфейс, нужный для сбора диагностики.
@@ -65,6 +65,11 @@ type SignalInfo struct {
 	DBM     int    `json:"dbm"`
 	Quality string `json:"quality,omitempty"`
 	Error   string `json:"error,omitempty"`
+
+	// CachedRSSI/CachedDBM — из service.LastCSQ(). Заполняется
+	// api.handlers при ошибке live AT+CSQ.
+	CachedRSSI int `json:"cached_rssi,omitempty"`
+	CachedDBM  int `json:"cached_dbm,omitempty"`
 }
 
 // RegInfo — статус регистрации (CREG/CGREG).
@@ -81,6 +86,14 @@ type RegInfo struct {
 	LAC    string `json:"lac,omitempty"`
 	CID    string `json:"cid,omitempty"`
 	Error  string `json:"error,omitempty"`
+
+	// CachedStatus/CachedText — закешированное значение из
+	// service.NetworkStatus() (networkLoop обновляет раз в
+	// 30s). Заполняется api.handlers, если live-запрос
+	// (AT+CREG?) упал. Не заменяет Status — пользователь
+	// видит и ошибку live, и кеш.
+	CachedStatus int    `json:"cached_status,omitempty"`
+	CachedText   string `json:"cached_text,omitempty"`
 }
 
 // OperatorInfo — информация об операторе.

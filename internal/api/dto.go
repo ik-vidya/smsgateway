@@ -88,11 +88,13 @@ type ListResponse struct {
 
 // StatusResponse — ответ GET /api/v1/status.
 type StatusResponse struct {
-	Status   string         `json:"status"`
-	Uptime   string         `json:"uptime,omitempty"`
-	Messages map[string]int `json:"messages,omitempty"`
-	Database *DBStatus      `json:"database,omitempty"`
-	Modem    *ModemStatus   `json:"modem,omitempty"`
+	Status    string         `json:"status"`
+	Uptime    string         `json:"uptime,omitempty"`
+	Version   string         `json:"version,omitempty"`
+	BuildTime string         `json:"build_time,omitempty"`
+	Messages  map[string]int `json:"messages,omitempty"`
+	Database  *DBStatus      `json:"database,omitempty"`
+	Modem     *ModemStatus   `json:"modem,omitempty"`
 }
 
 // DBStatus — состояние базы данных.

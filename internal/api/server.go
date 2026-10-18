@@ -23,13 +23,16 @@ type Server struct {
 	svc       *service.Service
 	notifier  notify.Notifier
 	logger    *slog.Logger
+	version   string
+	buildTime string
 	http      *http.Server
 	startTime time.Time
 }
 
 // New создаёт сервер с готовыми маршрутами. notifier может быть nil.
 func New(cfg *config.Config, store *storage.Store, svc *service.Service,
-	notifier notify.Notifier, logger *slog.Logger) *Server {
+	notifier notify.Notifier, logger *slog.Logger,
+	version, buildTime string) *Server {
 	if notifier == nil {
 		notifier = notify.Noop{}
 	}
@@ -39,6 +42,8 @@ func New(cfg *config.Config, store *storage.Store, svc *service.Service,
 		svc:       svc,
 		notifier:  notifier,
 		logger:    logger,
+		version:   version,
+		buildTime: buildTime,
 		startTime: time.Now(),
 	}
 

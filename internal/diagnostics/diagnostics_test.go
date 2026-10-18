@@ -2,6 +2,7 @@ package diagnostics
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -407,5 +408,49 @@ func TestParseCREGValidNoError(t *testing.T) {
 	}
 	if r.Status != 5 {
 		t.Errorf("Status=%d, ожидалось 5", r.Status)
+	}
+}
+
+// TestRegInfoCachedFields — сериализация CachedStatus/CachedText.
+func TestRegInfoCachedFields(t *testing.T) {
+	r := RegInfo{
+		Status:       0,
+		Error:        "no response (timeout or modem busy)",
+		CachedStatus: 5,
+		CachedText:   "зарегистрирован (роуминг)",
+	}
+	raw, err := json.Marshal(r)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	s := string(raw)
+	for _, want := range []string{
+		`"status":0`,
+		`"error":"no response`,
+		`"cached_status":5`,
+		`"cached_text":"зарегистрирован (роуминг)"`,
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("JSON не содержит %q: %s", want, s)
+		}
+	}
+}
+
+// TestSignalInfoCachedFields — сериализация CachedRSSI/CachedDBM.
+func TestSignalInfoCachedFields(t *testing.T) {
+	s := SignalInfo{
+		Error:      "no response",
+		CachedRSSI: 25,
+		CachedDBM:  -63,
+	}
+	raw, _ := json.Marshal(s)
+	str := string(raw)
+	for _, want := range []string{
+		`"cached_rssi":25`,
+		`"cached_dbm":-63`,
+	} {
+		if !strings.Contains(str, want) {
+			t.Errorf("JSON не содержит %q: %s", want, str)
+		}
 	}
 }
