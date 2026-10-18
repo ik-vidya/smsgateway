@@ -268,10 +268,10 @@ func runService(_ *cobra.Command, _ []string) error {
 		}
 		logger.Info("профиль модема", "profile", profile.Name())
 
-		port, err := modem.OpenSerial(modem.SerialConfig{
+		port, err := modem.OpenSerialWithRetry(modem.SerialConfig{
 			Port: cfg.SerialPort,
 			Baud: cfg.SerialBaud,
-		})
+		}, 15, time.Second)
 		if err != nil {
 			err = fmt.Errorf("открытие serial: %w", err)
 			notifier.Notify(ctx, notify.LevelCritical, err)
@@ -466,6 +466,7 @@ func runService(_ *cobra.Command, _ []string) error {
 		if err != nil {
 			notifier.Notify(ctx, notify.LevelCritical, err)
 			logger.Error("service: критическая ошибка, перезапуск через 3с", "err", err)
+			cancel()
 
 			shutdownCtx, shutdownCancel := context.WithTimeout(
 				context.Background(), 10*time.Second)

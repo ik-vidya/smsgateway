@@ -76,3 +76,21 @@ func ListSerialPorts() ([]string, error) {
 	}
 	return ports, nil
 }
+
+// OpenSerialWithRetry пытается открыть порт с повторами.
+// Нужно при старте сервиса или после syscall.Exec, когда
+// ядро ещё не успело создать /dev/ttyUSB*.
+func OpenSerialWithRetry(cfg SerialConfig, attempts int, delay time.Duration) (serial.Port, error) {
+	var err error
+	var port serial.Port
+	for i := 1; i <= attempts; i++ {
+		port, err = OpenSerial(cfg)
+		if err == nil {
+			return port, nil
+		}
+		if i < attempts {
+			time.Sleep(delay)
+		}
+	}
+	return nil, err
+}

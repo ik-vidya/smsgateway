@@ -71,7 +71,9 @@ func (s *Store) runRetentionOnce(ctx context.Context, policy RetentionPolicy, lo
 		res, err := s.db.ExecContext(ctx,
 			`DELETE FROM messages WHERE created_at < ?`, cutoff)
 		if err != nil {
-			logger.Error("retention: удаление messages", "err", err)
+			if ctx.Err() == nil {
+				logger.Error("retention: удаление messages", "err", err)
+			}
 		} else if n, _ := res.RowsAffected(); n > 0 {
 			logger.Info("retention: удалено messages", "count", n)
 		}
@@ -83,7 +85,9 @@ func (s *Store) runRetentionOnce(ctx context.Context, policy RetentionPolicy, lo
 		res, err := s.db.ExecContext(ctx,
 			`DELETE FROM delivery_reports WHERE received_at < ?`, cutoff)
 		if err != nil {
-			logger.Error("retention: удаление delivery_reports", "err", err)
+			if ctx.Err() == nil {
+				logger.Error("retention: удаление delivery_reports", "err", err)
+			}
 		} else if n, _ := res.RowsAffected(); n > 0 {
 			logger.Info("retention: удалено delivery_reports", "count", n)
 		}
@@ -91,14 +95,18 @@ func (s *Store) runRetentionOnce(ctx context.Context, policy RetentionPolicy, lo
 
 	// Просроченные pending_parts.
 	if n, err := s.ExpirePendingParts(ctx, policy.PendingPartsTTL); err != nil {
-		logger.Error("retention: очистка pending_parts", "err", err)
+		if ctx.Err() == nil {
+			logger.Error("retention: очистка pending_parts", "err", err)
+		}
 	} else if n > 0 {
 		logger.Info("retention: удалено pending_parts", "count", n)
 	}
 
 	// Просроченные pending_references.
 	if expired, err := s.ExpirePendingReferences(ctx); err != nil {
-		logger.Error("retention: очистка pending_references", "err", err)
+		if ctx.Err() == nil {
+			logger.Error("retention: очистка pending_references", "err", err)
+		}
 	} else if len(expired) > 0 {
 		logger.Info("retention: истекло pending_references", "count", len(expired))
 		// TODO(service): перевести связанные messages в sent_no_dr.
