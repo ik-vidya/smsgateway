@@ -86,7 +86,7 @@
         <tbody>
             {{ range .Items }}
             <tr>
-                <td><code>{{ .ID }}</code></td>
+                <td><a href="/messages/{{ .ID }}"><code>{{ .ID }}</code></a></td>
                 <td class="text-nowrap small">{{ fmtTime .CreatedAt }}</td>
                 <td><code>{{ .Peer }}</code></td>
                 <td><span class="badge bg-secondary">{{ T $ .StatusKey }}</span></td>

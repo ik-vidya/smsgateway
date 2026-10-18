@@ -99,6 +99,7 @@ func (s *Server) routes() http.Handler {
 	protected.HandleFunc("POST /api/v1/messages", s.handleSendMessage)
 	protected.HandleFunc("GET /api/v1/messages", s.handleListMessages)
 	protected.HandleFunc("GET /api/v1/messages/{id}", s.handleGetMessage)
+	protected.HandleFunc("GET /api/v1/messages/{id}/delivery-reports", s.handleMessageDeliveryReports)
 	protected.HandleFunc("DELETE /api/v1/messages/{id}", s.handleDeleteMessage)
 	protected.HandleFunc("POST /api/v1/test-sms", s.handleTestSMS)
 	protected.HandleFunc("GET /api/v1/diagnostics", s.handleDiagnostics)

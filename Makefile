@@ -98,6 +98,9 @@ diagnostics: build
 clean:
 	rm -rf $(BIN_DIR)
 
+deploy:
+	rsync -av $(BIN_DIR)/smsgateway rsdt@192.168.199.65:/home/rsmodule-common/bin
+
 dist: clean
 	@mkdir -p $(BIN_DIR)
 	CGO_ENABLED=0 GOOS=linux   GOARCH=amd64 go build $(GOFLAGS) -ldflags '$(LDFLAGS)' -o $(BIN_DIR)/$(BINARY)-linux-amd64   $(PKG)

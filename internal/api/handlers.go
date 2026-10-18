@@ -424,3 +424,48 @@ func parseIDPath(s string) (int64, error) {
 	}
 	return id, nil
 }
+
+// handleMessageDeliveryReports — GET /api/v1/messages/{id}/delivery-reports.
+//
+// Возвращает все delivery reports для сообщения.
+// Пустой список — если DR ещё не пришли (например, только что
+// отправлено) или модем не поддерживает DR (TP-SRR=0).
+func (s *Server) handleMessageDeliveryReports(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	id, err := parseIDPath(r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, CodeBadRequest, err.Error())
+		return
+	}
+
+	// Проверим, что сообщение существует, чтобы отличать
+	// «нет DR» от «нет сообщения».
+	if _, err := s.store.GetMessage(ctx, id); errors.Is(err, storage.ErrMessageNotFound) {
+		writeError(w, http.StatusNotFound, CodeNotFound,
+			fmt.Sprintf("сообщение %d не найдено", id))
+		return
+	} else if err != nil {
+		s.logger.Error("dr: GetMessage", "err", err, "id", id)
+		writeError(w, http.StatusInternalServerError,
+			CodeInternalError, "не удалось получить сообщение")
+		return
+	}
+
+	drs, err := s.store.ListDeliveryReportsByMessage(ctx, id)
+	if err != nil {
+		s.logger.Error("dr: ListDeliveryReportsByMessage", "err", err, "id", id)
+		writeError(w, http.StatusInternalServerError,
+			CodeInternalError, "не удалось получить delivery reports")
+		return
+	}
+
+	dtos := make([]DeliveryReportDTO, 0, len(drs))
+	for _, dr := range drs {
+		dtos = append(dtos, toDeliveryReportDTO(dr))
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"items": dtos,
+		"total": len(dtos),
+	})
+}

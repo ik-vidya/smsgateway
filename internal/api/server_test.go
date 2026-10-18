@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -389,5 +390,118 @@ func TestReadyzNoAuthRequired(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("status=%d — /readyz не должен требовать авторизацию",
 			w.Code)
+	}
+}
+
+// ==================== delivery reports ====================
+
+func TestDeliveryReportsEmpty(t *testing.T) {
+	// Сообщение только создано — DR ещё нет.
+	s := newTestServer(t)
+	w := doRequest(t, s, "POST", "/api/v1/messages",
+		SendRequest{To: "+37121234567", Text: "no DR yet"}, testKey)
+	var send SendResponse
+	_ = json.Unmarshal(w.Body.Bytes(), &send)
+
+	w = doRequest(t, s, "GET",
+		"/api/v1/messages/"+itoa(send.ID)+"/delivery-reports", nil, testKey)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d, тело: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Items []DeliveryReportDTO `json:"items"`
+		Total int                 `json:"total"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp.Total != 0 || len(resp.Items) != 0 {
+		t.Errorf("items=%d total=%d, ожидалось 0/0",
+			len(resp.Items), resp.Total)
+	}
+}
+
+func TestDeliveryReportsForMessage(t *testing.T) {
+	s := newTestServer(t)
+	ctx := context.Background()
+
+	// Создаём сообщение напрямую через store (чтобы пройти
+	// весь путь: create → sending → sent → DR).
+	msg := &storage.Message{
+		Direction: storage.DirectionOut,
+		Status:    storage.StatusQueued,
+		Source:    storage.SourceAPI,
+		Peer:      "+37121234567",
+		Text:      "with DR",
+	}
+	id, err := s.store.CreateMessage(ctx, msg)
+	if err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
+	if err := s.store.MarkSending(ctx, id); err != nil {
+		t.Fatalf("MarkSending: %v", err)
+	}
+	if err := s.store.MarkSent(ctx, id, 100); err != nil {
+		t.Fatalf("MarkSent: %v", err)
+	}
+
+	// Создаём DR (delivered, TP-ST=0).
+	dr := &storage.DeliveryReport{
+		MessageID:  sql.NullInt64{Int64: id, Valid: true},
+		Reference:  100,
+		TPST:       0x00,
+		StatusText: "доставлено",
+		Peer:       "+37121234567",
+		RawPDU:     "0691...",
+	}
+	if _, err := s.store.CreateDeliveryReport(ctx, dr); err != nil {
+		t.Fatalf("CreateDeliveryReport: %v", err)
+	}
+
+	w := doRequest(t, s, "GET",
+		"/api/v1/messages/"+itoa(id)+"/delivery-reports", nil, testKey)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d, тело: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Items []DeliveryReportDTO `json:"items"`
+		Total int                 `json:"total"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp.Total != 1 {
+		t.Fatalf("total=%d, ожидалось 1", resp.Total)
+	}
+	got := resp.Items[0]
+	if got.Reference != 100 {
+		t.Errorf("Reference=%d", got.Reference)
+	}
+	if got.TPST != 0 {
+		t.Errorf("TPST=%d", got.TPST)
+	}
+	if got.StatusText != "доставлено" {
+		t.Errorf("StatusText=%q", got.StatusText)
+	}
+	if got.MessageID == nil || *got.MessageID != id {
+		t.Errorf("MessageID=%v", got.MessageID)
+	}
+}
+
+func TestDeliveryReportsMessageNotFound(t *testing.T) {
+	s := newTestServer(t)
+	w := doRequest(t, s, "GET",
+		"/api/v1/messages/999999999/delivery-reports", nil, testKey)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("status=%d, ожидалось 404", w.Code)
+	}
+}
+
+func TestDeliveryReportsBadID(t *testing.T) {
+	s := newTestServer(t)
+	w := doRequest(t, s, "GET",
+		"/api/v1/messages/abc/delivery-reports", nil, testKey)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d, ожидалось 400", w.Code)
 	}
 }

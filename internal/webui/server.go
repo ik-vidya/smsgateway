@@ -150,6 +150,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /outbox", s.handleOutbox)
 	mux.HandleFunc("GET /compose", s.handleComposeForm)
 	mux.HandleFunc("POST /compose", s.handleComposeSubmit)
+	mux.HandleFunc("GET /messages/{id}", s.handleMessageDetail)
 	mux.HandleFunc("GET /logs", s.handleLogs)
 	mux.HandleFunc("GET /logs/stream", s.handleLogsStream)
 	mux.HandleFunc("GET /setup", s.handleSetup)
@@ -169,6 +170,7 @@ var pageFiles = map[string]string{
 	"compose":   "compose",
 	"inbox":     "messages",
 	"outbox":    "messages",
+	"message":   "message",
 	"logs":      "logs",
 	"setup":     "setup",
 }
@@ -186,8 +188,10 @@ func buildTemplates() (map[string]*template.Template, error) {
 			}
 			return b
 		},
-		"truncate": truncate,
-		"fmtTime":  fmtTime,
+		"truncate":    truncate,
+		"fmtTime":     fmtTime,
+		"statusBadge": statusBadge,
+		"statusKey":   statusLabelKey,
 	}
 
 	for key, file := range pageFiles {

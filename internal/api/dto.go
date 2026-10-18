@@ -150,3 +150,32 @@ type TestSMSResponse struct {
 	Error       string     `json:"error,omitempty"`
 	TimedOut    bool       `json:"timed_out,omitempty"`
 }
+
+// DeliveryReportDTO — представление delivery report в API.
+type DeliveryReportDTO struct {
+	ID         int64     `json:"id"`
+	MessageID  *int64    `json:"message_id,omitempty"`
+	Reference  int64     `json:"reference"`
+	TPST       int       `json:"tp_st"`
+	StatusText string    `json:"status_text"`
+	Peer       string    `json:"peer,omitempty"`
+	RawPDU     string    `json:"raw_pdu,omitempty"`
+	ReceivedAt time.Time `json:"received_at"`
+}
+
+func toDeliveryReportDTO(dr *storage.DeliveryReport) DeliveryReportDTO {
+	dto := DeliveryReportDTO{
+		ID:         dr.ID,
+		Reference:  dr.Reference,
+		TPST:       dr.TPST,
+		StatusText: dr.StatusText,
+		Peer:       dr.Peer,
+		RawPDU:     dr.RawPDU,
+		ReceivedAt: dr.ReceivedAt,
+	}
+	if dr.MessageID.Valid {
+		v := dr.MessageID.Int64
+		dto.MessageID = &v
+	}
+	return dto
+}

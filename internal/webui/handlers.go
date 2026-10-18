@@ -524,3 +524,20 @@ func networkStatusText(stat int) string {
 	}
 	return fmt.Sprintf("статус %d", stat)
 }
+
+// statusBadge возвращает CSS-класс Bootstrap для статуса.
+func statusBadge(st storage.Status) string {
+	switch st {
+	case storage.StatusDelivered:
+		return "bg-success"
+	case storage.StatusFailed:
+		return "bg-danger"
+	case storage.StatusSent:
+		return "bg-info"
+	case storage.StatusSentNoDR:
+		return "bg-warning text-dark"
+	case storage.StatusSending:
+		return "bg-warning text-dark"
+	}
+	return "bg-secondary"
+}

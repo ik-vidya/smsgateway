@@ -1,0 +1,122 @@
+{{ define "content" -}}
+<nav aria-label="breadcrumb">
+    <ol class="breadcrumb small">
+        <li class="breadcrumb-item"><a href="/">{{ T . "nav.dashboard" }}</a></li>
+        {{ if .IsIn }}
+            <li class="breadcrumb-item"><a href="/inbox">{{ T . "nav.inbox" }}</a></li>
+        {{ else }}
+            <li class="breadcrumb-item"><a href="/outbox">{{ T . "nav.outbox" }}</a></li>
+        {{ end }}
+        <li class="breadcrumb-item active">#{{ .Message.ID }}</li>
+    </ol>
+</nav>
+
+<h1>{{ T . "message.title" }} #{{ .Message.ID }}</h1>
+
+<div class="row g-3">
+    <div class="col-md-6">
+        <div class="card h-100">
+            <div class="card-header">{{ T . "message.details" }}</div>
+            <div class="card-body">
+                <dl class="row mb-0 small">
+                    <dt class="col-sm-5">{{ T . "messages.col.direction" }}</dt>
+                    <dd class="col-sm-7">
+                        {{ if .IsIn }}
+                            {{ T . "message.direction.in" }}
+                        {{ else }}
+                            {{ T . "message.direction.out" }}
+                        {{ end }}
+                    </dd>
+
+                    <dt class="col-sm-5">{{ T . "messages.col.peer" }}</dt>
+                    <dd class="col-sm-7"><code>{{ .Message.Peer }}</code></dd>
+
+                    <dt class="col-sm-5">{{ T . "messages.col.status" }}</dt>
+                    <dd class="col-sm-7">
+                        <span class="badge {{ statusBadge .Message.Status }}">
+                            {{ T . (statusKey .Message.Status) }}
+                        </span>
+                    </dd>
+
+                    {{ if .Message.Reference.Valid }}
+                    <dt class="col-sm-5">{{ T . "messages.col.reference" }}</dt>
+                    <dd class="col-sm-7"><code>{{ .Message.Reference.Int64 }}</code></dd>
+                    {{ end }}
+
+                    {{ if .Message.RetryCount }}
+                    <dt class="col-sm-5">{{ T . "messages.col.retry_count" }}</dt>
+                    <dd class="col-sm-7">{{ .Message.RetryCount }}</dd>
+                    {{ end }}
+
+                    {{ if .Message.Error }}
+                    <dt class="col-sm-5">{{ T . "messages.col.error" }}</dt>
+                    <dd class="col-sm-7 text-danger">{{ .Message.Error }}</dd>
+                    {{ end }}
+
+                    <dt class="col-sm-5">{{ T . "messages.col.created_at" }}</dt>
+                    <dd class="col-sm-7">{{ fmtTime .Message.CreatedAt }}</dd>
+
+                    {{ if .Message.SentAt.Valid }}
+                    <dt class="col-sm-5">{{ T . "messages.col.sent_at" }}</dt>
+                    <dd class="col-sm-7">{{ fmtTime .Message.SentAt.Time }}</dd>
+                    {{ end }}
+
+                    {{ if .Message.DeliveredAt.Valid }}
+                    <dt class="col-sm-5">{{ T . "messages.col.delivered_at" }}</dt>
+                    <dd class="col-sm-7">{{ fmtTime .Message.DeliveredAt.Time }}</dd>
+                    {{ end }}
+                </dl>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-6">
+        <div class="card h-100">
+            <div class="card-header">
+                {{ T . "message.reports" }}
+                {{ if .Reports }}<span class="badge bg-info">{{ len .Reports }}</span>{{ end }}
+            </div>
+            <div class="card-body">
+                {{ if not .Reports }}
+                    <p class="text-muted mb-0 small">{{ T . "message.reports.empty" }}</p>
+                {{ else }}
+                    <table class="table table-sm mb-0 small">
+                        <thead>
+                            <tr>
+                                <th>{{ T . "messages.col.received_at" }}</th>
+                                <th>{{ T . "messages.col.tp_st" }}</th>
+                                <th>{{ T . "messages.col.status_text" }}</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {{ range .Reports }}
+                            <tr>
+                                <td class="text-nowrap">{{ fmtTime .ReceivedAt }}</td>
+                                <td><code>0x{{ printf "%02X" .TPST }}</code></td>
+                                <td>{{ .StatusText }}</td>
+                            </tr>
+                            {{ end }}
+                        </tbody>
+                    </table>
+                {{ end }}
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card mt-3">
+    <div class="card-header">{{ T . "messages.col.text" }}</div>
+    <div class="card-body">
+        <pre class="mb-0 small">{{ .Message.Text }}</pre>
+    </div>
+</div>
+
+{{ if .Message.RawPDU }}
+<div class="card mt-3">
+    <div class="card-header">{{ T . "message.raw_pdu" }}</div>
+    <div class="card-body">
+        <pre class="mb-0 small text-muted">{{ .Message.RawPDU }}</pre>
+    </div>
+</div>
+{{ end }}
+{{- end }}
