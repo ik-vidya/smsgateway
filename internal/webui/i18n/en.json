@@ -124,6 +124,7 @@
   "setup.intro": "Plug the modem into a USB port. It will appear in the list below. Click Check to verify that it responds to AT commands, then Save & restart to apply.",
   "setup.manufacturer": "Manufacturer",
   "setup.model": "Model",
+  "setup.port_busy": "Port is in use by the running service. Use «Modem diagnostics» or «Send & receive test».",
   "setup.ports": "Detected ports",
   "setup.probe": "Check",
   "setup.probing": "Checking…",

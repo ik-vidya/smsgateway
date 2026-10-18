@@ -109,6 +109,11 @@ type setupProbeResponse struct {
 	Revision     string `json:"revision,omitempty"`
 	IMEI         string `json:"imei,omitempty"`
 	Error        string `json:"error,omitempty"`
+
+	// ErrorCode — машиночитаемый код для UI. Переводится в
+	// i18n на клиенте (см. setup.html data-port-busy).
+	// Error остаётся английским — для API/CLI клиентов.
+	ErrorCode string `json:"error_code,omitempty"`
 }
 
 // handleSetupProbe — POST /setup/probe.
@@ -152,9 +157,12 @@ func (s *Server) handleSetupProbe(w http.ResponseWriter, r *http.Request) {
 	reqReal, errReq := filepath.EvalSymlinks(req.Port)
 	cfgReal, errCfg := filepath.EvalSymlinks(s.cfg.SerialPort)
 	if errReq == nil && errCfg == nil && reqReal == cfgReal {
-		writeSetupErr(w, http.StatusConflict,
-			"port is in use by the running service; "+
-				"use diagnostics or send/receive test instead")
+		writeJSONSetup(w, http.StatusConflict, setupProbeResponse{
+			Port: req.Port,
+			Error: "port is in use by the running service; " +
+				"use diagnostics or send/receive test instead",
+			ErrorCode: "port_busy",
+		})
 		return
 	}
 

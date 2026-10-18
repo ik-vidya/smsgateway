@@ -194,6 +194,7 @@
             savingHint: list.dataset.savingHint,
             saved: list.dataset.saved,
             saveFailed: list.dataset.saveFailed,
+            portBusy: list.dataset.portBusy,
         };
 
         var probedPort = '';
@@ -249,6 +250,12 @@
             if (status !== 200 || (body && body.error)) {
                 result.className = 'alert alert-danger mt-3';
                 var msg = (body && body.error) || 'error';
+                // Машиночитаемый код → перевод. Fallback на
+                // английский текст, если ключа в i18n нет.
+                if (body && body.error_code === 'port_busy' &&
+                    labels.portBusy) {
+                    msg = labels.portBusy;
+                }
                 result.innerHTML = '<strong>' + escapeHtml(port) + '</strong>: ' +
                     escapeHtml(msg);
                 probedPort = '';

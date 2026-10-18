@@ -124,6 +124,7 @@
   "setup.intro": "Pievienojiet modemu USB portam. Tas parādīsies sarakstā zemāk. Nospiediet «Pārbaudīt», pēc tam «Saglabāt un pārstartēt».",
   "setup.manufacturer": "Ražotājs",
   "setup.model": "Modelis",
+  "setup.port_busy": "Portu izmanto palaists serviss. Izmantojiet «Modema diagnostika» vai «Sūtīšanas + saņemšanas tests».",
   "setup.ports": "Atrastie porti",
   "setup.probe": "Pārbaudīt",
   "setup.probing": "Pārbauda…",
