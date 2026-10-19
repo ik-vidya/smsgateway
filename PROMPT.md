@@ -195,7 +195,7 @@ probe-фиксом в коммит уехали `PROMPT.md`, `.gitignore`,
 | `internal/config` | `.env`, валидация, `envwrite` (правка `.env`), `ParseDuration` | 20+ |
 | `internal/logging` | `slog` + ring buffer (1000) + pub/sub для SSE + `Filter`/`SnapshotFiltered`/`Entry.Text` | 20+ |
 | `internal/storage` | SQLite (`modernc.org/sqlite`, без CGO), миграции, CRUD, retention | 14+ |
-| `internal/modem` | AT-транспорт (reader, URC-канал), `SendSMS` (PDU), `ReadSMS`, PIN-unlock, `discover` (порты/модемы); CREG/CGREG/CBC — ответы, не URC | 53+ |
+| `internal/modem` | AT-транспорт (reader, URC-канал), `SendSMS` (PDU), `ReadSMS`, PIN-unlock, `discover` (порты/модемы); CREG/CGREG/CBC — ответы, не URC; `OpenSerialWithRetry` (60 попыток) | 53+ |
 | `internal/profiles` | `generic`, `sim800`, `quectel`, `telit`, `huawei`; `Get()` case-insensitive, `Auto()` | 5 |
 | `internal/diagnostics` | `Collect()` — опрос AT, `Error` + `CachedStatus`/`CachedRSSI` при таймауте | 20+ |
 | `internal/probe` | Опрос модема + генерация скелета профиля; `--creg-timeout` для CREG/CGREG | 14 |
@@ -216,7 +216,7 @@ linux/arm64, linux/armv7, windows/amd64).
 
 1. **OIDC для Web UI (B4)** — отложено. `WEBUI_AUTH_MODE=none` —
    единственный режим. Ответственность за доступ — firewall/reverse
-   proxy.
+   proxy. Тег v1.0.0 ставится с этим ограничением.
 2. **Профили `quectel`/`telit`** — только заглушки `Generic`. Ждут
    реального железа.
 3. **Команда `probe` для автогенерации профиля** — реализована
@@ -229,10 +229,10 @@ linux/arm64, linux/armv7, windows/amd64).
    `+CREG` приходят часто, залогировано только изменение `stat`).
 5. **`make deploy`** — target есть (в вашем локальном `Makefile`), в
    CI не проверяется.
-6. **Тестирование модема из Web UI** — обсуждалось. Расширить
-   `/setup` блоками «Диагностика» (из `diagnostics.Collect`) и
-   «Входящие» (`ReadSMS(unread)`) — полезно. Сырые AT-команды —
-   **не делать** (риск сломать модем). Пока не реализовано.
+6. **Тестирование модема из Web UI** — реализовано в v1.0.0:
+   «Диагностика» (из `diagnostics.Collect`) и «Отправка + приём»
+   (отправка SMS на `SELF_NUMBER` + ожидание возврата). Сырые AT
+   остались за CLI.
 
 ---
 
@@ -263,6 +263,10 @@ linux/arm64, linux/armv7, windows/amd64).
   Уже случалось: `0b18fe4` уехал с `PROMPT.md`, `.gitignore`,
   `setup_test.go` под сообщением «probe: …». Защита — шаг 0 в
   обёртке (`git status --short` → стоп).
+- **Auto-recovery при отключении модема** — `urcLoop` замечает
+  закрытие канала, сохраняет fatalErr, отменяет контекст.
+  `main.go` делает `cleanup` + `syscall.Exec`. `OpenSerialWithRetry`
+  (60 попыток, 1с) ждёт появления `/dev/ttyUSB*` после перестановки.
 - **`#!/bin/bash -euo pipefail`** — не работает: ядро передаёт
   `-euo pipefail` как один аргумент → `invalid parameter name`
   на «строке 0». Только `#!/bin/bash` + `set -euo pipefail`
@@ -393,6 +397,35 @@ curl -s -H "X-API-Key: $KEY" \
   встречаться в содержимом.
 - **Разрыв файла на части** — «часть 1/2», «продолжение в следующем
   сообщении» недопустимы. Файл — целиком в одном блоке.
+- **`drainRespCh` крутится в busy loop, если канал закрыт.**
+  После отключения модема `readerLoop` делает `close(a.respCh)`.
+  Следующий `Exec` вызывает `drainRespCh`, где `for/select` читает
+  из `respCh` без проверки `ok`. Чтение из закрытого канала всегда
+  готово, `default` недостижим — вечный busy loop (100% CPU), он же
+  держит `cmdMu`, и все последующие `Exec` навсегда виснут.
+  Фикс: `case _, ok := <-a.respCh; if !ok { return }`.
+
+- **SIGHUP-релоад не перечитывает `.env` (устаревшие env).**
+  `syscall.Exec` передаёт `os.Environ()` родителя, где `SERIAL_PORT`
+  — старые значения. `godotenv.Load` в новом процессе не
+  перезаписывает уже установленные. Фикс: `godotenv.Overload`
+  перед `exec`.
+
+- **Сравнение портов строкой не работает с симлинками.**
+  `PortWatcher` отдаёт `/dev/serial/by-id/...`, а в `.env` может
+  быть кастомный симлинк udev (`/dev/smsgw-akawinsrv`). Фикс:
+  `filepath.EvalSymlinks` на бэкенде, передача флага `active` в SSE.
+
+- **`readerLoop` при `Read == (0, nil)` крутится в busy loop.**
+  CH340 при физическом отключении возвращает `(0, nil)` без
+  блокировки. В `readerLoop` стоял `if n == 0 { continue }` —
+  бесконечный цикл без пауз. Фикс: `select{ctx.Done, time.After(10ms)}`.
+
+- **При переносе модема в другой USB-порт `OpenSerial` падает
+  с `no such file or directory`.** `syscall.Exec` запускает новый
+  процесс мгновенно, а ядру нужно 1-2с, чтобы создать
+  `/dev/ttyUSBx`. Фикс: `OpenSerialWithRetry(60 попыток, 1с)`.
+
 
 ---
 
