@@ -35,6 +35,11 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 	}
 	data := s.baseData(r, "setup")
 	data["CurrentPort"] = s.cfg.SerialPort
+	if resolved, err := filepath.EvalSymlinks(s.cfg.SerialPort); err == nil {
+		data["ActivePortResolved"] = resolved
+	} else {
+		data["ActivePortResolved"] = s.cfg.SerialPort
+	}
 	data["EnvPath"] = s.envPath
 	data["SelfNumber"] = s.cfg.SelfNumber
 	s.render(w, "setup", data)
@@ -63,7 +68,7 @@ func (s *Server) handleSetupPortsStream(w http.ResponseWriter, r *http.Request) 
 	id, snap, ch := s.portWatcher.Subscribe()
 	defer s.portWatcher.Unsubscribe(id)
 
-	if err := writeSSEPorts(w, snap); err != nil {
+	if err := writeSSEPortsEnriched(w, snap, s.cfg.SerialPort); err != nil {
 		return
 	}
 	flusher.Flush()
@@ -79,7 +84,7 @@ func (s *Server) handleSetupPortsStream(w http.ResponseWriter, r *http.Request) 
 			if !ok {
 				return
 			}
-			if err := writeSSEPorts(w, ev); err != nil {
+			if err := writeSSEPortsEnriched(w, ev, s.cfg.SerialPort); err != nil {
 				return
 			}
 			flusher.Flush()
@@ -508,4 +513,35 @@ func (s *Server) handleSetupTestReceive(w http.ResponseWriter, r *http.Request) 
 		"receive_error":     res.ReceiveError,
 		"self_number":       s.cfg.SelfNumber,
 	})
+}
+
+type enrichedPort struct {
+	Path     string `json:"path"`
+	Resolved string `json:"resolved,omitempty"`
+	Active   bool   `json:"active"`
+}
+
+type enrichedEvent struct {
+	Ports []enrichedPort `json:"ports"`
+	New   []string       `json:"new,omitempty"`
+}
+
+func writeSSEPortsEnriched(w http.ResponseWriter, ev PortEvent, activePort string) error {
+	activeResolved, _ := filepath.EvalSymlinks(activePort)
+
+	out := enrichedEvent{New: ev.New}
+	for _, p := range ev.Ports {
+		resolved, _ := filepath.EvalSymlinks(p)
+		isActive := (resolved != "" && resolved == activeResolved) ||
+			(p == activePort)
+		out.Ports = append(out.Ports, enrichedPort{
+			Path: p, Resolved: resolved, Active: isActive,
+		})
+	}
+	raw, err := json.Marshal(out)
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintf(w, "data: %s\n\n", raw)
+	return err
 }

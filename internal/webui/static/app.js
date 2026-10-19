@@ -202,6 +202,7 @@
 
         var probedPort = '';
         var activePort = list.dataset.activePort || '';
+        var activeResolved = list.dataset.activeResolved || '';
 
         function renderPorts(ports) {
             items.innerHTML = '';
