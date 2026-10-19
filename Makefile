@@ -99,7 +99,9 @@ clean:
 	rm -rf $(BIN_DIR)
 
 deploy:
+	ssh rsdt@192.168.199.65 sudo systemctl stop smsgateway@smsgw-akawinsrv.service
 	rsync -av $(BIN_DIR)/smsgateway rsdt@192.168.199.65:/home/rsmodule-common/bin
+	ssh rsdt@192.168.199.65 sudo systemctl start smsgateway@smsgw-akawinsrv.service
 
 dist: clean
 	@mkdir -p $(BIN_DIR)
