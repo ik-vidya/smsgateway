@@ -215,21 +215,31 @@
                 empty.classList.add('d-none');
                 list.classList.remove('d-none');
                 ports.forEach(function (p) {
-                    if (p === activePort) isActivePresent = true;
+                    var portPath = (typeof p === 'object' && p !== null) ? p.path : p;
+                    var isActive = false;
+
+                    if (typeof p === 'object' && p !== null) {
+                        isActive = p.active === true;
+                    } else {
+                        isActive = (portPath === activePort) ||
+                            (activeResolved !== '' && portPath === activeResolved);
+                    }
+
+                    if (isActive) isActivePresent = true;
+
                     var li = document.createElement('li');
                     li.className = 'setup-port-item d-flex align-items-center gap-2 mb-2';
-                    var isActive = (p === activePort);
                     var action;
                     if (isActive) {
                         action = '<span class="badge bg-secondary">' +
                             escapeHtml(labels.portInUse) + '</span>';
                     } else {
                         action = '<button type="button" class="btn btn-sm btn-primary setup-probe"' +
-                            ' data-port="' + escapeHtml(p) + '">' +
+                            ' data-port="' + escapeHtml(portPath) + '">' +
                             escapeHtml(labels.probe) + '</button>';
                     }
                     li.innerHTML =
-                        '<code class="flex-grow-1">' + escapeHtml(p) + '</code>' +
+                        '<code class="flex-grow-1">' + escapeHtml(portPath) + '</code>' +
                         action;
                     items.appendChild(li);
                 });
@@ -667,7 +677,7 @@
         }
     }
 
-    // Вызовы новых функций.
+    // Вызовы функций для новых карточек.
     initSetupDiagnostics();
     initSetupTestReceive();
 })();
