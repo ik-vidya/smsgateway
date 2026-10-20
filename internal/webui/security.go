@@ -81,3 +81,19 @@ func sameOrigin(r *http.Request) bool {
 	}
 	return true
 }
+
+// withBasicAuth проверяет HTTP Basic Auth, если включён режим basic.
+func (s *Server) withBasicAuth(next http.Handler) http.Handler {
+	if s.cfg.WebUIAuthMode != "basic" {
+		return next
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		user, pass, ok := r.BasicAuth()
+		if !ok || user != s.cfg.WebUIAuthUser || pass != s.cfg.WebUIAuthPass {
+			w.Header().Set("WWW-Authenticate", `Basic realm="smsgateway"`)
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}

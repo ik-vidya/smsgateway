@@ -63,6 +63,8 @@ type Config struct {
 	WebUIEnabled     bool
 	WebUIAddr        string
 	WebUIAuthMode    string
+	WebUIAuthUser    string
+	WebUIAuthPass    string
 	WebUIDefaultLang string
 	WebUISupported   []string
 }
@@ -96,6 +98,8 @@ func Load(path string) (*Config, error) {
 		TelegramChatID:   os.Getenv("TELEGRAM_CHAT_ID"),
 		WebUIAddr:        envDefault("WEBUI_ADDR", "127.0.0.1:8081"),
 		WebUIAuthMode:    envDefault("WEBUI_AUTH_MODE", "none"),
+		WebUIAuthUser:    os.Getenv("WEBUI_AUTH_USER"),
+		WebUIAuthPass:    os.Getenv("WEBUI_AUTH_PASS"),
 		WebUIDefaultLang: envDefault("WEBUI_DEFAULT_LANG", "en"),
 	}
 

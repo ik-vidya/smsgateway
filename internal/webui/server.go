@@ -77,10 +77,10 @@ func New(cfg *config.Config, store *storage.Store, svc *service.Service,
 		return nil, errors.New("webui: store обязателен")
 	}
 
-	if mode := cfg.WebUIAuthMode; mode != "" && mode != "none" {
+	if mode := cfg.WebUIAuthMode; mode != "" && mode != "none" && mode != "basic" {
 		return nil, fmt.Errorf(
-			"webui: WEBUI_AUTH_MODE=%q пока не поддерживается "+
-				"(доступно только none)", mode)
+			"webui: WEBUI_AUTH_MODE=%q не поддерживается "+
+				"(доступно none|basic)", mode)
 	}
 
 	bundle, err := buildBundle(cfg.WebUISupported, logger)
@@ -171,7 +171,7 @@ func (s *Server) routes() http.Handler {
 
 	mux.Handle("GET /static/", newStaticHandler())
 
-	return withSecurityHeaders(withCSRF(mux))
+	return withSecurityHeaders(withCSRF(s.withBasicAuth(mux)))
 }
 
 var pageFiles = map[string]string{
