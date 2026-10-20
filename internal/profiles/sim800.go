@@ -62,8 +62,10 @@ func (SIM800) PreInitHook(ctx context.Context, m ModemHook) error {
 	// CSMP: SRR=1, VPF=01, VP=24ч. Нужно до первой отправки.
 	_, _ = m.Exec(ctx, "AT+CSMP=49,167,0,0")
 
-	// Fast SMS sending (best-effort).
-	_, _ = m.Exec(ctx, "AT+CMMS=2")
+	// Keep connection open (CMMS=1), но не пытаемся
+	// склеивать в один пакет (CMMS=2), так как операторы
+	// блокируют Fast SMS (ошибка Temporary failure).
+	_, _ = m.Exec(ctx, "AT+CMMS=1")
 
 	// Кодировка для text-режима (если будем использовать).
 	_, _ = m.Exec(ctx, `AT+CSCS="UCS2"`)

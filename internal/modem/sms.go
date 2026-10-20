@@ -85,6 +85,12 @@ func (m *Modem) SendSMS(ctx context.Context, peer, text string, opts SendOptions
 		RawPDUs:    make([]string, 0, len(parts)),
 	}
 
+	// Ограничиваем количество частей: слишком длинные
+	// сообщения сеть всё равно заблокирует (Temporary failure).
+	if len(parts) > 10 {
+		return SendResult{}, fmt.Errorf("сообщение слишком длинное (%d частей, максимум 10)", len(parts))
+	}
+
 	// 4. Отправить все части последовательно.
 	for i, part := range parts {
 		cmd := fmt.Sprintf("AT+CMGS=%d", part.TpduLength)
@@ -102,6 +108,17 @@ func (m *Modem) SendSMS(ctx context.Context, peer, text string, opts SendOptions
 		}
 		res.References = append(res.References, ref)
 		res.RawPDUs = append(res.RawPDUs, part.Hex)
+
+		// Пауза между частями. Без неё сеть оператора
+		// блокирует отправку с ошибкой Temporary failure.
+		if i < len(parts)-1 {
+			m.logger.Debug("modem: пауза перед следующей частью", "delay", "2s")
+			select {
+			case <-ctx.Done():
+				return res, ctx.Err()
+			case <-time.After(2 * time.Second):
+			}
+		}
 	}
 
 	// 5. Заполнить поля первой части для совместимости.
