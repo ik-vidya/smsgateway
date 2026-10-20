@@ -5,6 +5,28 @@
 <div class="alert alert-danger">{{ .ErrorMessage }}</div>
 {{ end }}
 
+{{ if and (eq .Direction "in") .PendingParts }}
+<div class="alert alert-warning">
+    <h5 class="alert-heading">{{ T . "messages.pending.title" }}</h5>
+    <p class="small mb-2">{{ T . "messages.pending.intro" }}</p>
+    <ul class="mb-0 small">
+    {{ range .PendingParts }}
+        <li class="mb-2">
+            <strong>{{ .Peer }}</strong> — {{ .Received }} из {{ .Total }} (получено {{ fmtTime .CreatedAt }})
+            <details>
+                <summary style="cursor:pointer">{{ T . "messages.pending.details" }}</summary>
+                <ul class="mt-1">
+                {{ range $seq, $text := .Bodies }}
+                    <li><strong>#{{ $seq }}:</strong> <code>{{ $text }}</code></li>
+                {{ end }}
+                </ul>
+            </details>
+        </li>
+    {{ end }}
+    </ul>
+</div>
+{{ end }}
+
 <form class="row g-2 align-items-end mb-3"
       hx-get="{{ .BasePath }}"
       hx-target="#messages-table"

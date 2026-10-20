@@ -189,6 +189,12 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request,
 	data["ErrorMessage"] = ""
 	data["Filters"] = filters
 
+	if dir == storage.DirectionIn {
+		if pending, err := s.store.ListPendingParts(r.Context()); err == nil && len(pending) > 0 {
+			data["PendingParts"] = pending
+		}
+	}
+
 	items, total, err := s.store.ListMessages(r.Context(), storage.Filter{
 		Direction: dir,
 		Status:    filters.Status,

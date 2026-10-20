@@ -252,3 +252,63 @@ func (s *Store) ExpirePendingParts(ctx context.Context, ttl time.Duration) (int,
 	n, _ := res.RowsAffected()
 	return int(n), nil
 }
+
+// ListPendingParts возвращает все незавершённые сборки
+// multipart-сообщений с уже полученными частями.
+func (s *Store) ListPendingParts(ctx context.Context) ([]*PendingPart, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, reference, peer, total, received, created_at
+		  FROM pending_parts
+		 ORDER BY created_at DESC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []*PendingPart
+	for rows.Next() {
+		p := &PendingPart{}
+		if err := rows.Scan(&p.ID, &p.Reference, &p.Peer, &p.Total, &p.Received, &p.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(out) == 0 {
+		return nil, nil
+	}
+
+	for _, p := range out {
+		bodies, err := s.loadBodies(ctx, p.ID)
+		if err != nil {
+			return nil, err
+		}
+		p.Bodies = bodies
+	}
+	return out, nil
+}
+
+func (s *Store) loadBodies(ctx context.Context, pendingID int64) (map[int]string, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT seq, text FROM pending_part_bodies WHERE pending_id = ? ORDER BY seq`,
+		pendingID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make(map[int]string)
+	for rows.Next() {
+		var seq int
+		var text string
+		if err := rows.Scan(&seq, &text); err != nil {
+			return nil, err
+		}
+		out[seq] = text
+	}
+	return out, rows.Err()
+}
