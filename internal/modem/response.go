@@ -144,13 +144,13 @@ var cmsErrors = map[int]string{
 	330:  "SMSC address unknown",
 	331:  "no network service",
 	332:  "network timeout",
-	500:  "unknown error (часто: нет баланса или SMS-центр недоступен)",
+	500:  "unknown error (часто: нет баланса, нет роуминга или SMS-центр недоступен)",
 	2171: "нет сети (SIMCom): модем не зарегистрирован",
 	2172: "нет сети (SIMCom): сеть недоступна",
 }
 
 var simcomTextErrors = map[string]string{
-	"Temporary failure":        "временный сбой: SMSC недоступен (повторить)",
+	"Temporary failure":        "временный сбой SMSC (часто: нет роуминга, нет баланса или перегрузка сети)",
 	"No network service":       "нет сети: модем не зарегистрирован",
 	"Network not allowed":      "сеть не разрешена для этой SIM",
 	"Unassigned number":        "номер не назначен",

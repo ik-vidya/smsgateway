@@ -332,7 +332,7 @@ func TestInterpretErrorLine(t *testing.T) {
 		"+CME ERROR: 10":                "SIM not inserted",
 		"+CMS ERROR: 500":               "нет баланса",
 		"+CMS ERROR: 2171":              "нет сети",
-		"+CMS ERROR: Temporary failure": "SMSC недоступен",
+		"+CMS ERROR: Temporary failure": "временный сбой SMSC",
 	}
 	for in, want := range cases {
 		got := InterpretErrorLine(in)
