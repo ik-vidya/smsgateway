@@ -463,8 +463,8 @@ func (s *Service) handleURC(ctx context.Context, u modem.URC) {
 	case modem.URCCMTI:
 		s.logger.Info("service: новый SMS",
 			"mem", v.Mem, "index", v.Index)
-		if err := s.ingestSMS(ctx, v.Index); err != nil {
-			s.logger.Error("service: ingestSMS", "err", err, "index", v.Index)
+		if err := s.ingestSMS(ctx); err != nil {
+			s.logger.Error("service: ingestSMS", "err", err)
 		}
 	case modem.URCCDS:
 		s.logger.Info("service: delivery report",
@@ -523,22 +523,24 @@ func (s *Service) handleURC(ctx context.Context, u modem.URC) {
 	}
 }
 
-func (s *Service) ingestSMS(ctx context.Context, index int) error {
+func (s *Service) ingestSMS(ctx context.Context) error {
 	msgs, err := s.modem.ReadSMS(ctx, modem.ReadFilter{})
 	if err != nil {
 		return fmt.Errorf("ReadSMS: %w", err)
 	}
-	var target *modem.SMSMessage
-	for i := range msgs {
-		if msgs[i].Index == index {
-			target = &msgs[i]
-			break
+
+	// Итерируемся с конца, чтобы удаление SMS не сдвигало индексы
+	// оставшихся сообщений в памяти модема (баг SIM800L).
+	for i := len(msgs) - 1; i >= 0; i-- {
+		target := msgs[i]
+		if err := s.processIncomingSMS(ctx, &target); err != nil {
+			s.logger.Error("service: processIncomingSMS", "err", err, "index", target.Index)
 		}
 	}
-	if target == nil {
-		return fmt.Errorf("SMS с index=%d не найдена", index)
-	}
+	return nil
+}
 
+func (s *Service) processIncomingSMS(ctx context.Context, target *modem.SMSMessage) error {
 	var finalText, finalRawPDU string
 
 	// Проверяем, является ли SMS частью multipart-сообщения.
@@ -556,7 +558,7 @@ func (s *Service) ingestSMS(ctx context.Context, index int) error {
 			s.logger.Info("service: получена часть multipart SMS",
 				"ref", mp.Reference, "seq", mp.Sequence, "total", mp.Total)
 			if s.deleteAfterRead {
-				_ = s.modem.DeleteSMS(ctx, index)
+				_ = s.modem.DeleteSMS(ctx, target.Index)
 			}
 			return nil
 		}
@@ -583,7 +585,7 @@ func (s *Service) ingestSMS(ctx context.Context, index int) error {
 	}
 	if len(existing) > 0 && existing[0].Text == finalText {
 		if s.deleteAfterRead {
-			_ = s.modem.DeleteSMS(ctx, index)
+			_ = s.modem.DeleteSMS(ctx, target.Index)
 		}
 		return nil
 	}
@@ -606,9 +608,9 @@ func (s *Service) ingestSMS(ctx context.Context, index int) error {
 	s.writeToGammuInbox(target, id)
 
 	if s.deleteAfterRead {
-		if err := s.modem.DeleteSMS(ctx, index); err != nil {
+		if err := s.modem.DeleteSMS(ctx, target.Index); err != nil {
 			s.logger.Warn("service: не удалось удалить SMS из модема",
-				"index", index, "err", err)
+				"index", target.Index, "err", err)
 		}
 	}
 	return nil

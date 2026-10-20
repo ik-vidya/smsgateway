@@ -692,7 +692,7 @@ func TestSendTestSMSWithReceive_OK(t *testing.T) {
 // TestURCCMTIMultipart проверяет сборку длинных SMS из нескольких частей.
 func TestURCCMTIMultipart(t *testing.T) {
 	mock := newMockModem()
-	// Эмулируем 2 части одного сообщения
+	// Эмулируем 1-ю часть
 	mock.readSMSResult = []modem.SMSMessage{
 		{
 			Index:  5,
@@ -701,15 +701,6 @@ func TestURCCMTIMultipart(t *testing.T) {
 			Text:   "Part 1. ",
 			Multipart: &modem.MultipartInfo{
 				Reference: 42, Total: 2, Sequence: 1,
-			},
-		},
-		{
-			Index:  6,
-			Status: "REC UNREAD",
-			Peer:   "+37121234567",
-			Text:   "Part 2.",
-			Multipart: &modem.MultipartInfo{
-				Reference: 42, Total: 2, Sequence: 2,
 			},
 		},
 	}
@@ -728,6 +719,19 @@ func TestURCCMTIMultipart(t *testing.T) {
 	_, total, _ := store.ListMessages(ctx, storage.Filter{Direction: storage.DirectionIn})
 	if total != 0 {
 		t.Fatalf("после 1-й части total=%d, ожидалось 0", total)
+	}
+
+	// Эмулируем 2-ю часть
+	mock.readSMSResult = []modem.SMSMessage{
+		{
+			Index:  6,
+			Status: "REC UNREAD",
+			Peer:   "+37121234567",
+			Text:   "Part 2.",
+			Multipart: &modem.MultipartInfo{
+				Reference: 42, Total: 2, Sequence: 2,
+			},
+		},
 	}
 
 	// Приходит вторая часть
