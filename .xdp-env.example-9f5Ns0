@@ -1,0 +1,99 @@
+# ============================================================================
+# smsgateway configuration
+# Copy to .env and adjust. Run with: smsgateway -config .env
+# ============================================================================
+
+# --- HTTP API ---
+HTTP_ADDR=127.0.0.1:8080
+# One key, or comma-separated list for multiple clients:
+API_KEY=change-me-to-a-long-random-string
+# API_KEYS=key1,key2,key3
+
+# --- Modem ---
+SERIAL_PORT=/dev/ttyUSB0
+SERIAL_BAUD=115200
+# Таймаут обычных AT-команд (AT, ATI, CGMI и т.п.).
+MODEM_CMD_TIMEOUT=5s
+# Отдельный таймаут для AT+CMGS (отправка SMS). SIM800L при
+# занятой сети может «думать» до 30-60s. Слишком короткий
+# таймаут приводит к отмене висящей CMGS через ESC и повторной
+# отправке. По умолчанию 60s, менять не рекомендуется.
+MODEM_CMGS_TIMEOUT=60s
+# Профиль модема: sim800 | quectel | telit | huawei | generic
+# "generic" — только общие AT-команды, без специфичных обходов.
+MODEM_PROFILE=generic
+# Storage: ME или SM. Пусто — использовать значение по умолчанию профиля.
+MODEM_STORAGE=
+# PIN SIM-карты. Пусто — если PIN не требуется.
+# Никогда не логируется.
+MODEM_PIN=
+SMS_DELETE_AFTER_READ=true
+
+# --- Storage ---
+DB_PATH=./data/smsgateway.db
+# Поддерживает суффиксы h, m, s, d. Примеры: 720h, 7d, 1d12h.
+# Пусто = хранить вечно.
+SMS_RETENTION=7d
+
+# --- Gammu file backend (пусто GAMMU_ROOT = выключен) ---
+#
+# Совместим с форматом gammu-smsd Files backend.
+# Если GAMMU_ROOT задан, все подкаталоги по умолчанию — inbox, outbox,
+# sent, error. Абсолютные пути в GAMMU_INBOX/GAMMU_OUTBOX/... можно
+# задавать напрямую, тогда они используются как есть.
+#
+# Inbox:    сюда пишутся принятые модемом SMS.
+# Outbox:   отсюда читаются файлы OUT*.txt и ставятся в очередь отправки.
+# Sent:     сюда перемещаются успешно отправленные.
+# Error:    сюда перемещаются файлы с исчерпанными попытками и те,
+#           что не удалось разобрать (не поддерживается формат).
+GAMMU_ROOT=
+GAMMU_INBOX=inbox
+GAMMU_OUTBOX=outbox
+GAMMU_SENT=sent
+GAMMU_ERROR=error
+# Формат файлов в inbox: standard | unicode | utf8 | detail
+#   standard, utf8 — UTF-8 без BOM (по умолчанию utf8)
+#   unicode        — UTF-16LE с BOM
+#   detail         — SMS Backup XML (не поддерживается)
+GAMMU_INBOX_FORMAT=utf8
+# Период сканирования outbox.
+GAMMU_WATCH_INTERVAL=5s
+# Сколько всего попыток отправки (включая первую).
+# При каждой неудаче приоритет файла понижается (A→B→…→Z).
+# Достигли Z раньше лимита — файл сразу идёт в error.
+GAMMU_OUTBOX_MAX_ATTEMPTS=5
+
+# --- Logging ---
+LOG_LEVEL=info
+LOG_FORMAT=text
+
+# --- Self-test SMS ---
+SELF_NUMBER=+37121234567
+# Таймаут ожидания delivery report для selftest и POST /test-sms.
+# На SIM800L DR может приходить через 60-90 секунд после отправки.
+# 120s — разумный дефолт; меньше — selftest будет часто возвращать
+# timed_out, хотя SMS фактически доставлена.
+TEST_SMS_TIMEOUT=120s
+
+# --- Telegram alerts (пусто = выключено) ---
+TELEGRAM_BOT_TOKEN=
+TELEGRAM_CHAT_ID=
+
+# --- Admin Web UI (по умолчанию выключен) ---
+WEBUI_ENABLED=false
+WEBUI_ADDR=127.0.0.1:8081
+# none | basic
+# none — без авторизации (только для localhost/SSH-туннеля).
+# basic — HTTP Basic Auth (требует WEBUI_AUTH_USER и WEBUI_AUTH_PASS).
+WEBUI_AUTH_MODE=none
+WEBUI_AUTH_USER=
+WEBUI_AUTH_PASS=
+# OIDC пока не поддерживается (запланировано на будущее).
+WEBUI_OIDC_ISSUER=
+WEBUI_OIDC_CLIENT_ID=
+WEBUI_OIDC_CLIENT_SECRET=
+WEBUI_OIDC_REDIRECT_URL=http://127.0.0.1:8081/auth/callback
+WEBUI_OIDC_SCOPES=openid,profile,email
+WEBUI_DEFAULT_LANG=en
+WEBUI_SUPPORTED_LANGS=ru,lv,en

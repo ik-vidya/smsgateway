@@ -1,377 +1,123 @@
 # smsgateway
 
-SMS-шлюз для AT-совместимых GSM-модемов. Работает как долгоживущий
-сервис: принимает SMS через модем, сохраняет в SQLite, отдаёт через
-HTTP/JSON REST API. Более полная альтернатива `gammu-smsd`, написанная
-на идиоматичном Go.
+Легковесный и надежный SMS-шлюз для AT-совместимых GSM-модемов (протестирован на SIM800L). 
+Принимает и отправляет SMS, сохраняет историю в SQLite, предоставляет HTTP/JSON REST API и Web-интерфейс. 
+Поддерживает интеграцию с внешними системами через файловый бэкенд Gammu и синхронизацию (например, Syncthing).
 
-## Текущее состояние
+## Возможности
 
-Готов к продакшену. Реализованы:
-
-- **REST API** — отправка/приём SMS, статус, диагностика,
-  самопроверка (`/api/v1/*`);
-- **Web UI** — dashboard, inbox, outbox, compose, live-логи
-  (SSE), настройка модема с hot-reload через SIGHUP;
-- **Gammu file backend** — совместимость с `gammu-smsd`,
-  конвертер `gammu-smsdrc → .env`;
-- **Профили модемов** — `generic`, `sim800`, `quectel`,
-  `telit`, `huawei`; команда `probe` для генерации скелета
-  нового профиля;
-- **CLI** — `detect-modem`, `probe`, `gammu-outbox`,
-  `convert-gammu-config`, `migrate`, `list-ports`;
-- **Telegram-алерты** — критические ошибки, самопроверка.
-
-Единственное, чего нет — **OIDC-авторизации для Web UI**
-(`WEBUI_AUTH_MODE=none`); ответственность за доступ — на
-администраторе (firewall / reverse proxy). Подробности —
-[docs/STATUS.md](docs/STATUS.md).
-
-## Возможности (реализовано)
-
-- Отправка SMS через AT+CMGS в PDU-режиме (GSM-7, UCS-2).
-- Приём SMS через URC `+CMTI` и AT+CMGL, декодирование PDU.
-- Сохранение сообщений в SQLite (`modernc.org/sqlite`, без CGO).
-- Delivery reports: таблица `delivery_reports`, обновление статуса
-  сообщения на `delivered`/`failed`.
-- Защита от коллизий 8-битного TP-MR через `pending_references`.
-- Retention: автоматическая очистка старых записей.
-- HTTP/JSON REST API с API-ключом.
-- Мульти-профильная абстракция модемов: `generic`, `sim800` (со всеми
-  обходами багов прошивки SIM800L).
-- `log/slog` с уровнями `debug|info|warn|error` и форматами `text|json`.
-- Режим "без модема": если `SERIAL_PORT` пуст или `none`, сервис
-  работает без железа (API принимает SMS в очередь).
-
-## Требования
-
-- Go 1.26+ для сборки.
-- AT-совместимый GSM-модем (для реальной работы).
-- Для разработки удобно держать рядом
-  [sim800ctl](https://git.vidya.lv/vidya/sim800ctl) — см. раздел
-  «Связанные проекты».
-
-## Сборка
-
-```bash
-git clone https://git.vidya.lv/vidya/smsgateway.git
-cd smsgateway
-make build
-```
-
-`make build` делает `tidy`, `fmt`, `vet` и собирает бинарник.
-Вендорные ассеты (Bootstrap и htmx) уже в репозитории
-(`internal/webui/static/vendor/`), но если их нет — `make fetch`
-скачает их (требуется `curl` или `wget`).
-
-Полный прогон как в CI:
-
-```bash
-make ci
-```
-
-Кросс-сборка:
-
-```bash
-make dist   # linux/amd64, linux/arm64, linux/armv7
-```
+- **Отправка и прием SMS**: Поддержка текстовых сообщений, кириллицы (UCS-2) и длинных SMS (Multipart).
+- **Web UI**: Удобный интерфейс для мониторинга, поиска, отправки сообщений и настройки модема.
+- **Безопасность**: Поддержка HTTP Basic Auth для защиты Web UI.
+- **REST API**: Полноценное API для интеграции с вашими приложениями.
+- **Gammu File Backend**: Чтение из `outbox`, запись в `inbox`, автоматическая генерация отчетов о доставке (Delivery Reports).
+- **Управление очередью**: Возможность отменить ошибочно отправленное сообщение или повторить отправку при сбое.
 
 ## Быстрый старт
 
-```bash
-# 1. Конфигурация
+### 1. Сборка
+Для сборки потребуется Go 1.26+.
+
+~~~bash
+git clone https://git.vidya.lv/vidya/smsgateway.git
+cd smsgateway
+make build
+~~~
+
+Бинарник появится в `bin/smsgateway`.
+
+### 2. Настройка
+Скопируйте пример конфигурации и отредактируйте его:
+
+~~~bash
 cp .env.example .env
-$EDITOR .env
-# Обязательные поля: API_KEY, DB_PATH.
-# Для реального модема: SERIAL_PORT=/dev/ttyUSB0, MODEM_PROFILE=sim800.
-# Для теста без модема: SERIAL_PORT=none
+nano .env
+~~~
 
-# 2. Миграции БД
-./bin/smsgateway migrate --config .env
+Обязательно укажите:
+- `API_KEY` (или `API_KEYS`) — ключ для доступа к REST API.
+- `SERIAL_PORT` — путь к модему (например, `/dev/ttyUSB0` или `/dev/serial/by-id/usb-...`).
+- `DB_PATH` — путь к файлу базы данных SQLite.
 
-# 3. Запуск
-./bin/smsgateway --config .env
-```
+### 3. Запуск
 
-Сервис слушает `HTTP_ADDR` (по умолчанию `127.0.0.1:8080`).
+~~~bash
+sudo ./bin/smsgateway --config .env
+~~~
 
-## CLI
+## Конфигурация (.env)
 
-```
-smsgateway --config /path/to/.env           запустить сервис
-smsgateway -v                               показать версию
-smsgateway version                          показать версию
-smsgateway migrate --config /path/to/.env   применить миграции БД
-smsgateway list-ports                       список последовательных портов
-smsgateway gammu-outbox --config .env       разовый прогон outbox
-smsgateway gammu-outbox --config .env --dry-run  план без отправки
-smsgateway convert-gammu-config --from /etc/gammu-smsdrc
-smsgateway convert-gammu-config --from /etc/gammu-smsdrc --to my.env
-smsgateway detect-modem                     найти модемы и их параметры
-smsgateway detect-modem --json              для скриптов
-smsgateway detect-modem --skip-at           без опроса модема
-smsgateway detect-modem --write-config .env вписать SERIAL_PORT в .env
-```
+Все настройки задаются через переменные окружения в файле `.env`.
 
-### Несколько модемов на одной машине
+### Web UI и Безопасность
+По умолчанию Web UI работает без пароля. Если вы выставляете его в сеть, включите Basic Auth:
 
-`/dev/ttyUSB*` переезжает между перезагрузками, поэтому для
-конфига лучше использовать стабильные пути
-`/dev/serial/by-id/*`:
+~~~env
+WEBUI_ENABLED=true
+WEBUI_ADDR=127.0.0.1:8081
+WEBUI_AUTH_MODE=basic
+WEBUI_AUTH_USER=admin
+WEBUI_AUTH_PASS=your_strong_password
+~~~
 
-```bash
-smsgateway detect-modem
-# PORT          STABLE-ID                                            VID:PID    IMEI            MODEL
-# /dev/ttyUSB0  /dev/serial/by-id/usb-Silicon_Labs_CP2102_...-port0  10C4:EA60  863584038586060 SIMCOM_SIM800L
-# /dev/ttyUSB1  /dev/serial/by-id/usb-FTDI_FT232R_...-port0         0403:6001  012345678901234 SIMCOM_SIM800L
-```
+### Модем
+~~~env
+SERIAL_PORT=/dev/serial/by-id/usb-1a86_USB2.0-Serial-if00-port0
+MODEM_PROFILE=sim800
+~~~
 
-Полученный STABLE-ID можно вписать в `SERIAL_PORT` вручную — или
-поручить это команде:
+### Gammu File Backend (Опционально)
+Если вы хотите обмениваться сообщениями с внешней системой (АСУ ПП, 1С) через файлы:
 
-```bash
-smsgateway detect-modem --write-config .env
-```
+~~~env
+GAMMU_ROOT=/var/spool/sms
+GAMMU_INBOX=inbox
+GAMMU_OUTBOX=outbox
+GAMMU_SENT=sent
+GAMMU_ERROR=error
+~~~
 
-Команда найдёт модем (единственный — без вопросов, несколько —
-предложит выбрать), запишет в `SERIAL_PORT` наиболее стабильный
-путь (by-id → by-path → /dev/ttyUSB*), сохранив комментарии и
-остальные переменные в `.env`. Если ключ закомментирован —
-раскомментирует.
+## Интеграция с внешними системами (Gammu)
 
-Итог:
+`smsgateway` может работать как замена `gammu-smsd`, используя файловый обмен. 
 
-```
-SERIAL_PORT=/dev/serial/by-id/usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_0001-if00-port0
-```
+### Отправка (Outbox)
+Внешняя система кладет файл `OUT*.txt` в папку `outbox`. Шлюз отправляет SMS и перемещает файл в `sent`.
 
-## HTTP API
+### Получение (Inbox)
+Принятые SMS сохраняются в базу и дублируются в папку `inbox` (в формате plain text).
 
-Базовый путь: `/api/v1`. Авторизация — заголовок `X-API-Key` или
-`Authorization: Bearer <key>`. `/healthz` — без авторизации.
+### Отчеты о доставке (Delivery Reports)
+Если внешней системе нужно знать статус доставки, шлюз генерирует специальные файлы в папке `inbox`:
+`IN<дата>_<sms_id>_<номер>_00.txt` (с текстом `DELIVERED` или `FAILED`). 
+`sms_id` берется из имени исходящего файла (Serial).
 
-### `GET /healthz`
+## REST API
 
-Простой healthcheck: «процесс жив». Без авторизации.
+Базовый путь: `/api/v1`. Аутентификация через заголовок `X-API-Key` или `Authorization: Bearer <key>`.
 
-```json
-{"status": "ok"}
-```
+- `GET /healthz` — проверка работоспособности (без авторизации).
+- `GET /api/v1/status` — состояние сервиса и модема.
+- `POST /api/v1/messages` — поставить SMS в очередь на отправку.
+- `GET /api/v1/messages` — список сообщений (с фильтрами).
+- `GET /api/v1/diagnostics` — диагностика модема.
 
-### `GET /readyz`
+Подробнее в [docs/API.md](docs/API.md).
 
-Расширенный healthcheck: проверяет доступность БД (критично,
-`503` при провале) и предупреждает о неготовности модема.
-Без авторизации. Для docker/k8s/reverse-proxy healthcheck.
+## Развертывание (systemd)
 
-```json
-{
-  "status": "ready",
-  "checks": {"database": {"ok": true}},
-  "warnings": ["modem configured but not registered in network"]
-}
-```
-
-### `GET /api/v1/status`
-
-Состояние сервиса, статистика БД, информация о модеме.
-
-```json
-{
-  "status": "ok",
-  "uptime": "5m12s",
-  "messages": {
-    "queued": 0,
-    "sent": 3,
-    "delivered": 12,
-    "failed": 1
-  },
-  "database": { "path": "./data/smsgateway.db", "healthy": true },
-  "modem": {
-    "configured": true,
-    "port": "/dev/ttyUSB0",
-    "profile": "sim800",
-    "manufacturer": "SIMCOM_Ltd",
-    "model": "SIMCOM_SIM800L",
-    "revision": "Revision:1418B04SIM800L24",
-    "imei": "863584038586060",
-    "signal": 17,
-    "network": 5,
-    "network_text": "зарегистрирован (роуминг)"
-  }
-}
-```
-
-### `POST /api/v1/messages`
-
-Отправить SMS.
-
-```bash
-curl -X POST \
-  -H "X-API-Key: $KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"to":"+37121234567","text":"Привет"}' \
-  http://127.0.0.1:8080/api/v1/messages
-```
-
-Ответ `202 Accepted`:
-
-```json
-{"id": 42, "status": "queued"}
-```
-
-Сообщение попадает в очередь, сервисный слой отправляет его через
-модем. Статус обновляется по мере продвижения:
-`queued → sending → sent → delivered` (или `failed`/`sent_no_dr`).
-
-### `GET /api/v1/messages`
-
-Список с фильтрами. Query-параметры:
-
-- `direction` — `in` или `out`;
-- `status` — `queued|sending|sent|delivered|failed|sent_no_dr|received`;
-- `peer` — подстрока номера;
-- `since`, `until` — RFC3339;
-- `limit` (по умолчанию 50, макс 500), `offset`.
-
-```json
-{
-  "items": [
-    {
-      "id": 42,
-      "direction": "out",
-      "status": "delivered",
-      "peer": "+37121234567",
-      "text": "Привет",
-      "reference": 179,
-      "sent_at": "2026-10-15T12:00:02Z",
-      "delivered_at": "2026-10-15T12:00:34Z",
-      "created_at": "2026-10-15T12:00:00Z",
-      "updated_at": "2026-10-15T12:00:34Z"
-    }
-  ],
-  "total": 1,
-  "limit": 10,
-  "offset": 0
-}
-```
-
-### `GET /api/v1/messages/{id}`
-
-Одно сообщение.
-
-### `DELETE /api/v1/messages/{id}`
-
-Удалить сообщение. Ответ `204 No Content`.
-
-### Формат ошибок
-
-```json
-{"error": {"code": "bad_request", "message": "..."}}
-```
-
-## Конфигурация
-
-Файл `.env`. Полный пример — [.env.example](.env.example).
-
-| Переменная | Описание |
-|---|---|
-| `HTTP_ADDR` | Адрес HTTP API (по умолчанию `127.0.0.1:8080`) |
-| `API_KEY` / `API_KEYS` | API-ключ(и). Хотя бы один обязателен |
-| `SERIAL_PORT` | Порт модема (`/dev/ttyUSB0`, `COM3` или `none`) |
-| `SERIAL_BAUD` | Скорость порта (по умолчанию 115200) |
-| `MODEM_CMD_TIMEOUT` | Таймаут AT-команды (по умолчанию 5s) |
-| `MODEM_PROFILE` | `generic` (по умолчанию), `sim800` |
-| `DB_PATH` | Путь к SQLite-файлу |
-| `SMS_RETENTION` | Срок хранения: `7d`, `720h`, `1d12h`. Пусто — вечно |
-| `LOG_LEVEL` | `debug`, `info`, `warn`, `error` |
-| `LOG_FORMAT` | `text` или `json` |
-| `GAMMU_ROOT` | Корень Gammu file backend. Пусто — выключен |
-| `GAMMU_INBOX` / `_OUTBOX` / `_SENT` / `_ERROR` | Подкаталоги (по умолчанию inbox/outbox/sent/error) |
-| `GAMMU_INBOX_FORMAT` | `utf8` (default) / `unicode` / `standard` / `detail` |
-| `GAMMU_WATCH_INTERVAL` | Период сканирования outbox (по умолчанию 5s) |
-| `GAMMU_OUTBOX_MAX_ATTEMPTS` | Всего попыток отправки (по умолчанию 5) |
-
-Также в `.env` есть переменные для будущих функций (web-UI,
-Telegram) — см. `.env.example`.
-
-## Архитектура
-
-```
-cmd/smsgateway/       — точка входа, CLI
-internal/config/      — .env, валидация
-internal/logging/     — log/slog
-internal/storage/     — SQLite, миграции, репозитории, retention
-internal/modem/       — AT-транспорт, URC-канал, Send/Read/Delete
-internal/profiles/    — профили модемов: generic, sim800
-internal/service/     — URC-цикл, отправка, pending references, DR
-internal/api/         — HTTP-сервер, middleware, handlers
-```
-
-Ключевая особенность AT-транспорта: **два независимых потока** —
-синхронные ответы на команды (через `Exec`) и асинхронные URC
-(через `URCs()`). URC могут прийти в середине ответа на AT-команду
-(особенно на SIM800L), и без разделения каналов корректная работа
-невозможна. Подробнее — [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
-
-## Миграция с gammu-smsd
-
-Если у вас уже работает `gammu-smsd`, его файловый бэкенд
-совместим с smsgateway. Чтобы перейти:
-
-```bash
-smsgateway convert-gammu-config --from /etc/gammu-smsdrc --to smsgateway.env
-```
-
-Конвертер прочитает `[gammu]` и `[smsd]`, выпишет совместимые
-опции и отчитается о том, что проигнорировано (флаг `--verbose`
-для полного списка). `MaxRetries` преобразуется в
-`GAMMU_OUTBOX_MAX_ATTEMPTS` по формуле N+1: в gammu-smsd это
-число повторов после первой попытки, у нас — общее число попыток.
-
-Поддерживается только `Connection = serial` или `at`. `irda` и
-`bluetooth` не поддерживаются.
-
-## Связанные проекты
-
-- [sim800ctl](https://git.vidya.lv/vidya/sim800ctl) — CLI-утилита
-  для работы с SIM800L. Пакеты `pkg/pdu` (PDU encode/decode) и
-  `pkg/number` (нормализация номеров) переиспользуются в
-  `smsgateway`.
-
-Для локальной разработки оба проекта держатся рядом и связываются
-через `go.work`:
-
-```
-go-smsd/
-├── go.work              ← go work init ./sim800ctl ./smsgateway
-├── sim800ctl/
-└── smsgateway/
-```
-
-## Документация
-
-- [docs/STATUS.md](docs/STATUS.md) — что реализовано, что нет.
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — архитектура.
-- [docs/API.md](docs/API.md) — HTTP API.
-- [docs/DEPLOY.md](docs/DEPLOY.md) — развёртывание (systemd,
-  docker, Raspberry Pi, миграция с gammu-smsd).
-- [docs/MODEMS.md](docs/MODEMS.md) — профили модемов.
-- [docs/WEBUI.md](docs/WEBUI.md) — веб-UI.
-- [docs/GAMMU-FORMAT.md](docs/GAMMU-FORMAT.md) — формат Gammu.
+Для продакшена рекомендуется использовать systemd. 
+Пример юнита `smsgateway@.service` и правила `udev` для создания стабильного симлинка `/dev/sms-gateway` находятся в папке `scripts/`.
 
 ## Разработка
 
-```bash
-make test        # go test ./...
-make test-race   # go test -race ./...
-make vet         # go vet ./...
-make lint        # golangci-lint (если установлен)
-```
-
-Проект создан с использованием AI-ассистента DeepSeek в режиме
-диалога. Коммиты содержат trailer `Assisted-by: DeepSeek chat`.
+~~~bash
+make test      # запустить тесты
+make test-race # запустить тесты с race detector
+make ci        # полный прогон (gofmt, vet, test, build)
+make deploy    # безопасный деплой на удаленный сервер (с бэкапом и откатом)
+~~~
 
 ## Лицензия
 
-MIT — см. [LICENSE](LICENSE).
+MIT License. См. файл [LICENSE](LICENSE).

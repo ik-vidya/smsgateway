@@ -1,7 +1,31 @@
+# PROMPT.md — точка входа для нового чата
+
+> Прочитай этот файл целиком. Затем жди приложенный snapshot
+> (`smsgateway-snapshot-*.md`) — там полные исходники. Не задавай
+> уточняющих вопросов, если ответ есть в snapshot или здесь.
+> Если чего-то действительно не хватает — уточни один раз, коротко.
+
+---
+
+## 1. Проект
+
+**smsgateway** — SMS-шлюз для AT-совместимых GSM-модемов.
+Долгоживущий сервис: принимает SMS через модем, сохраняет в SQLite,
+отдаёт через HTTP/JSON REST API, имеет Web UI, поддерживает Gammu
+file backend.
+
+**Расположение:**
+
+~~~
+/mnt/Data-work/Projects/go-projects/go-smsd/
+├── go.work              ← workspace, связывает оба модуля
+├── sim800ctl/           ← CLI-утилита (публичный)
+└── smsgateway/          ← основной проект (приватный, текущий)
+~~~
 
 **Go 1.26** (не 1.27, см. `go.mod`). `go.work` связывает `sim800ctl`
 и `smsgateway`; `smsgateway` импортирует
-`github.com/ik-vidya/sim800ctl/pkg/pdu` и `.../pkg/number`.
+`git.vidya.lv/vidya/sim800ctl/pkg/pdu` и `.../pkg/number`.
 
 **CI зелёный**, HEAD на момент создания промпта — см. snapshot.
 
@@ -147,309 +171,120 @@ pipefail` **отдельной строкой**.
 probe-фиксом в коммит уехали `PROMPT.md`, `.gitignore`,
 `setup_test.go` под чужим сообщением. Шаг 0 — защита.
 
-**Почему именно такой порядок:**
-
-- `gofmt -s -w .` до commit → `make build`'s `gofmt` не найдёт
-  изменений → version без `-dirty`.
-- Пре-чек до commit → при FAIL нет мусорного коммита в истории
-  (это уже случалось: `70ade33` ушёл в `main` некомпилируемым).
-- `make build` после commit → `git describe --always` видит
-  актуальный коммит (а не предыдущий), `--dirty` не выставляется.
-- `make build` до push → если сборка упала (что маловероятно после
-  `go build ./...`, но `-ldflags`/`-trimpath`/CGO могут дать сбой),
-  коммит остаётся локальным, push не выполняется. Не публикуем
-  нерабочее.
-- Проверка `git status --short` после `make build` — защита от
-  случая, когда `tidy` или `fmt` внутри `make build` неожиданно
-  изменили файл (например, обновили `go.sum`). Auto-amend
-  гарантирует, что `version` в артефакте совпадает с SHA коммита.
-
-**Что НЕ делать:**
-
-- `make build` до `git commit` — version будет `-dirty` и со
-  старым SHA (уже случалось: `870e00c-dirty` при HEAD
-  `b7145013`).
-- `git commit` без пре-чека — некомпилируемый коммит в `main`
-  (уже случалось: `70ade33` с `undefined: strings`).
-- `git push` до `make build` — на удалённой машине окажется
-  версия, которую вы не проверили.
-- `git commit --amend` после `git push` — перезапись уже
-  опубликованной истории (нужен force-push, ломает коллег).
-- `gofmt -w internal/ cmd/` вместо `gofmt -s -w .` — `make fmt`
-  использует `-s`, а `make build` вызывает `make fmt`.
-  Несовпадение флагов → `-dirty`.
-- `#!/bin/bash -euo pipefail` — ядро передаёт `-euo pipefail`
-  как один аргумент, bash падает на «строке 0». Только
-  `#!/bin/bash` + `set -euo pipefail` отдельной строкой.
-- Выдавать файл «частями» или разрывать блоком кода посередине —
-  копирование/скачивание ломается. См. «Формат выдачи кода».
-
 ---
 
-## 3. Текущее состояние пакетов
+## 3. Текущее состояние пакетов (v1.1.0)
 
 Все пакеты **реализованы и покрыты тестами**:
 
 | Пакет | Что делает | Тестов |
 |---|---|---|
-| `internal/config` | `.env`, валидация, `envwrite` (правка `.env`), `ParseDuration` | 20+ |
-| `internal/logging` | `slog` + ring buffer (1000) + pub/sub для SSE + `Filter`/`SnapshotFiltered`/`Entry.Text` | 20+ |
-| `internal/storage` | SQLite (`modernc.org/sqlite`, без CGO), миграции, CRUD, retention | 14+ |
-| `internal/modem` | AT-транспорт (reader, URC-канал), `SendSMS` (PDU), `ReadSMS`, PIN-unlock, `discover` (порты/модемы); CREG/CGREG/CBC — ответы, не URC; `OpenSerialWithRetry` (60 попыток) | 53+ |
-| `internal/profiles` | `generic`, `sim800`, `quectel`, `telit`, `huawei`; `Get()` case-insensitive, `Auto()` | 5 |
-| `internal/diagnostics` | `Collect()` — опрос AT, `Error` + `CachedStatus`/`CachedRSSI` при таймауте | 20+ |
-| `internal/probe` | Опрос модема + генерация скелета профиля; `--creg-timeout` для CREG/CGREG | 14 |
-| `internal/service` | URC-цикл, sendLoop (retry), pending refs, DR, networkLoop, `EnqueueOutgoing`, `Registered()` | 40+ |
-| `internal/api` | REST API: `/healthz`, `/readyz`, `/api/v1/*` (включая `/messages/{id}/delivery-reports`), `/api/v1/status` (+version/build_time) | 25+ |
+| `internal/config` | `.env`, валидация, `envwrite` (правка `.env`), `ParseDuration`, Basic Auth | 20+ |
+| `internal/logging` | `slog` + ring buffer (1000) + pub/sub для SSE | 20+ |
+| `internal/storage` | SQLite, миграции, CRUD, retention, pending_parts, gammu_serial | 15+ |
+| `internal/modem` | AT-транспорт, `SendSMS` (PDU + пауза 1s), `ReadSMS`, `OpenSerialWithRetry` | 55+ |
+| `internal/profiles` | `generic`, `sim800`, `quectel`, `telit`, `huawei` | 5 |
+| `internal/diagnostics` | `Collect()` — опрос AT, CREG/COPS/CSQ контекст | 20+ |
+| `internal/probe` | Опрос модема + генерация скелета профиля | 14 |
+| `internal/service` | URC-цикл, sendLoop, multipart-сборка, DR, networkLoop, cancel/retry | 45+ |
+| `internal/api` | REST API: `/healthz`, `/readyz`, `/api/v1/*` | 25+ |
 | `internal/notify` | Telegram (async, dedup, rate limit) + Noop | 13 |
-| `internal/gammu` | Gammu file backend: watcher outbox, retry без переименования, inbox/inbox writer, конвертер `gammu-smsdrc → .env`, plain-text fallback | 55+ |
-| `internal/webui` | Bootstrap 5.2 + htmx 4.0 (локально в `static/vendor/`), i18n ru/lv/en, dashboard/inbox/outbox/compose/logs(SSE)/setup/messages/{id} (со страницей DR), `/logs/download` (text/jsonl), `/setup/save` (SIGHUP hot-reload) | 10+ |
-| `cmd/smsgateway` | cobra: `version`, `migrate`, `list-ports`, `detect-modem`, `probe`, `gammu-outbox`, `convert-gammu-config`, сервис | — |
+| `internal/gammu` | Gammu backend: watcher, DR-файлы, конвертер `gammu-smsdrc → .env` | 55+ |
+| `internal/webui` | Basic Auth, Поиск по тексту, Отмена/Повтор, DR-блок, SSE | 10+ |
+| `cmd/smsgateway` | cobra: все команды | — |
 
-**CI:** `.github/workflows/ci.yml` — `gofmt -l`, `go vet`, `go test`,
-`-race` для параллельных, vendor-check, cross-compile (linux/amd64,
-linux/arm64, linux/armv7, windows/amd64).
+**CI:** `.forgejo/workflows/ci.yml` — `gofmt -l`, `go vet`, `go test`,
+`-race`, vendor-check, cross-compile.
 
 ---
 
 ## 4. Что НЕ реализовано
 
-1. **OIDC для Web UI (B4)** — отложено. `WEBUI_AUTH_MODE=none` —
-   единственный режим. Ответственность за доступ — firewall/reverse
-   proxy. Тег v1.0.0 ставится с этим ограничением.
-2. **Профили `quectel`/`telit`** — только заглушки `Generic`. Ждут
-   реального железа.
-3. **Команда `probe` для автогенерации профиля** — реализована
-   и проверена на двух живых модемах SIM800L (2026-10-18):
-   профиль `sim800` определяется автоматически, все четыре
-   обхода (`ForceUCS2ForAllSMS`, `UseCSMPForSRR`,
-   `AlignReadStorage`, `PinAttemptsAT`) подтверждены. На других
-   модемах (Quectel, Telit, Huawei) автогенерация не проверялась.
-4. **`AT+CREG=1` вместо `=2`** — обсуждалось, но не сделано (URC
-   `+CREG` приходят часто, залогировано только изменение `stat`).
-5. **`make deploy`** — target есть (в вашем локальном `Makefile`), в
-   CI не проверяется.
-6. **Тестирование модема из Web UI** — реализовано в v1.0.0:
-   «Диагностика» (из `diagnostics.Collect`) и «Отправка + приём»
-   (отправка SMS на `SELF_NUMBER` + ожидание возврата). Сырые AT
-   остались за CLI.
+1. **OIDC для Web UI (B4)** — отложено. `WEBUI_AUTH_MODE=basic` закрывает
+   базовые потребности.
+2. **Профили `quectel`/`telit`** — только заглушки `Generic`.
+3. **Flash SMS** — не поддерживается на уровне `pdu.Build`.
+4. **Встроенное автообновление** — сознательно не делаем. Безопаснее
+   использовать `make deploy` (с бэкапом и авто-откатом).
 
 ---
 
 ## 5. Известные подводные камни
 
-- **SIM800L в 2G.** Два живых модема на 2026-10-18: один в
-  роуминге (`CREG stat=5`), другой местный (`stat=1`). Оба
-  работают. После фикса роутинга `+CREG`/`+CGREG` (см. §8)
-  `AT+CREG?`/`AT+CGREG?` стабильно отвечают, `networkLoop`
-  обновляет `networkStat` через оба пути (URC + опрос).
-- **DR приходит через 60–90 секунд** после `+CMGS`. `TEST_SMS_TIMEOUT`
-  по умолчанию **120s**. `api-test.sh` считает `sent` успехом
-  (DR может прийти позже).
-- **`GAMMU_WATCH_INTERVAL=5s`** — при длинной очереди скан может
-  идти минутами (последовательная обработка). Второй экземпляр
-  `smsgateway` на том же outbox — **опасен** (сценарий дубля на
-  retry). Один процесс на outbox обязателен.
-- **`make build` внутри обёртки** — после commit, до push.
-  Иначе version `-dirty`.
-- **`/logs/download` — без авторизации** (как `/logs` и
-  `/logs/stream`). Web UI слушает `0.0.0.0:8086` — доступ в сети.
-- **`imei` может быть невалидным**, если UART SIM800L глючит при
-  таймауте (`sanitizeValue` стрипает `\r`, но не восстанавливает
-  цифры). `Raw["AT+CGSN.warning"]` сигнализирует.
-- **`SMSC` приходит в UCS-2 hex** (`002B0033...`) — `parseSMSC`
-  пробует ASCII-hex, затем UTF-16BE, затем возвращает исходное.
-- **`git add -A` в обёртке** — захватывает все `M`/`??` в дереве.
-  Уже случалось: `0b18fe4` уехал с `PROMPT.md`, `.gitignore`,
-  `setup_test.go` под сообщением «probe: …». Защита — шаг 0 в
-  обёртке (`git status --short` → стоп).
-- **Auto-recovery при отключении модема** — `urcLoop` замечает
-  закрытие канала, сохраняет fatalErr, отменяет контекст.
-  `main.go` делает `cleanup` + `syscall.Exec`. `OpenSerialWithRetry`
-  (60 попыток, 1с) ждёт появления `/dev/ttyUSB*` после перестановки.
-- **`#!/bin/bash -euo pipefail`** — не работает: ядро передаёт
-  `-euo pipefail` как один аргумент → `invalid parameter name`
-  на «строке 0». Только `#!/bin/bash` + `set -euo pipefail`
-  отдельной строкой.
-- **Вложенные разделители в блоке кода** — `~~~markdown` с
-  `~~~bash` внутри ломает копирование файла целиком. Внешний
-  разделитель не должен встречаться в содержимом.
-- **`probe` не вызывает `Modem.Init`** — поэтому `CSCS: "IRA"`
-  и `CPMS: "ME",…` в отчёте — это сырое состояние модема.
-  `PreInitHook` профиля (CSCS=UCS2, CPMS="SM","SM","SM")
-  сработает при старте сервиса. Не пугаться.
+- **SIM800L в 2G.** Два живых модема: один в роуминге (`stat=5`),
+  другой местный (`stat=1`). CREG/CGREG стабильны.
+- **Длинные SMS (Multipart).** Входящие собираются в `pending_parts`.
+  Исходящие отправляются с паузой (1s) и лимитом 10 частей.
+  Ошибка `Temporary failure` возникает при отсутствии роуминга,
+  теперь логируется с контекстом `CREG/COPS/CSQ`.
+- **Gammu интеграция (АСУ ПП).** DR-файлы (`DELIVERED`/`FAILED`)
+  создаются в `inbox`. `gammu_serial` и `created_at` берутся из
+  имени файла (`fn.Serial`, `fn.Time`).
+- **`make deploy`** — безопасный (бэкап, is-active check, авто-откат).
+- **Web UI Basic Auth** — при `WEBUI_AUTH_MODE=basic` требует
+  `WEBUI_AUTH_USER` и `WEBUI_AUTH_PASS`.
 
 ---
 
 ## 6. Проверка на живом модеме
 
-Два модема SIM800L (`Revision:1418B04SIM800L24`):
-- местный — `CREG stat=1`;
-- в роуминге 2G Латвии — `CREG stat=5`.
-
-Оба — на **другой машине** (`rsmodule-tallin1`,
-192.168.199.65:8085 API / 8086 Web UI). В текущем окружении
-модемов нет — все unit-тесты на mock-модемах.
-
-**Отправка SMS проверена** на живом модеме (2026-10-18):
-`sendLoop` → `AT+CMGS` → `+CMGS: <ref>` → `+CDS` (DR) — работает
-end-to-end. `probe` проверен на двух модемах: `Auto()` вернул
-`sim800`, все четыре обхода подтверждены, `--creg-timeout`
-(10s) и фикс роутинга `+CREG`/`+CGREG` убирают потерю ответов.
-
-Если задача требует проверки на железе — пользователь выполнит
-сам. Готовый тестовый скрипт — `test-tallin1.sh` в корне (три
-прогона `api-test.sh`).
+Модемы SIM800L на удалённой машине (`rsmodule-tallin1`).
+Проверка отправки/приёма, DR, long SMS.
 
 **Деплой на удалённую:**
-
 ~~~bash
-make build
-scp bin/smsgateway rsdt@192.168.199.65:/tmp/smsgateway-new
-ssh rsdt@192.168.199.65 '
-    BIN=$(readlink -f /proc/$(pgrep -f "smsgateway --config")/exe)
-    sudo cp /tmp/smsgateway-new "$BIN"
-    sudo chmod +x "$BIN"
-    sudo pkill -f "smsgateway --config"
-    sleep 1
-    cd /home/rsmodule-common/bin && ./smsgateway.sh &
-'
+make deploy
 ~~~
 
-Проверка:
-
+**Откат:**
 ~~~bash
-curl -s -H "X-API-Key: $KEY" \
-    http://192.168.199.65:8085/api/v1/status | jq '{version, build_time}'
+make rollback
+make rollback-to VERSION=20261020-193807
 ~~~
-
-Если `build_time` старее последнего коммита — деплой не сделан.
 
 ---
 
 ## 7. Порядок действий в новом чате
 
 1. Прочитать `PROMPT.md` (этот файл).
-2. Прочитать `smsgateway-snapshot-*.md` (приложен) — там полные
-   исходники, git status, git log, дерево файлов, интерфейсы.
-3. Спросить пользователя: **«С какой задачей продолжаем?»** —
-   с учётом раздела 4.
-4. Получить подтверждение по деталям (если задача крупная —
-   согласовать объём MVP, например для Web UI).
-5. Выдать **полный файл** (новый) или **Python-скрипт** (правка) —
-   **одним блоком**, см. раздел 2 «Формат выдачи кода».
-6. Пользователь применит → gofmt/build/vet/test/commit/push.
-7. Перед деплоем на удалённую — **напомнить**: `make build`, `scp`,
-   `pkill`, перезапуск.
+2. Прочитать `smsgateway-snapshot-*.md` (приложен).
+3. Спросить: **«С какой задачей продолжаем?»**
+4. Получить подтверждение по деталям.
+5. Выдать **полный файл** или **Python-скрипт** — **одним блоком**.
+6. Пользователь применит → commit/push.
+7. Деплой через `make deploy`.
 
 ---
 
 ## 8. Известные баги-грабли (не повторять)
 
-- **Slice-append с указателем**: `r := &m.script[i]` +
-  `append(m.script[:i], m.script[i+1:]...)` → указатель на сдвинутый
-  элемент. Копировать значение: `r := m.script[i]`.
-- **Порядок в Close**: сначала `transport.Close()` (разблокирует
-  Read), затем `wg.Wait()`, затем `close(closedCh)`.
-- **Mock через `io.Pipe`**: `.Write` блокируется. `sync.Cond` +
-  `bytes.Buffer`.
-- **Указатель на элемент slice после удаления** — то же, что
-  slice-append.
-- **`time.Duration` в JSON** — int64 наносекунд. Для человекочитаемого
-  — отдельное поле `WaitMillis int64`.
-- **`mockModem.SendSMS` без `References`** — service ждёт
-  `res.References[0]`. Автозаполнять из `res.Reference`.
-- **`go mod edit -require=@v0.0.0`** — требует сетевой версии.
-  `@latest` или `replace=../sim800ctl`.
-- **Anchors в Python-патчах** — ломаются на gofmt. Использовать
-  `replace_func` (по имени функции с балансировкой скобок).
-- **`:=` в Python** — это Go, не Python. Виноват дважды за сессию.
-- **`for i < len(src):` в Python** — тоже Go. `while`.
-- **Патч `exec` в `diagnostics.go`** — anchor не совпал из-за
-  форматирования; использовать `replace_func`.
-- **`statusKey` vs `statusLabelKey`** — в funcMap шаблона нужно
-  `statusLabelKey` (в handlers.go).
-- **`strings` в `logs.go`** — забыт импорт при добавлении
-  `handleLogsDownload`.
-- **`#!/bin/bash -euo pipefail`** — недопустим: ядро передаёт
-  `-euo pipefail` как ОДИН аргумент bash → `invalid parameter
-  name` (сообщение «строка 0»). Правильно: `#!/bin/bash` +
-  `set -euo pipefail` отдельной строкой.
-- **`git add -A` при грязном дереве** — посторонние правки уедут
-  в коммит с чужим сообщением (уже случалось: `0b18fe4`).
-  Защита — шаг 0 в обёртке.
-- **Регекспы CREG/CGREG матчили ответ на AT+CREG?, а не URC.**
-  По 3GPP TS 27.007 ответ на AT+CREG? — `+CREG: <n>,<stat>`
-  (два числа перед кавычками), URC — `+CREG: <stat>` (одно
-  число). Регексп `^\+CREG:\s*(\d+)\s*,\s*(\d+)` матчил только
-  ответ, поэтому: (а) ответ на `Exec("AT+CREG?")` попадал в
-  `urcCh` и терялся; (б) настоящий URC уходил в `respCh` и
-  выбрасывался `drain'ом` перед следующей командой. Побочно:
-  `+CBC` (в 3GPP никогда не URC) тоже терялся. Симптом:
-  `probe` показывает `CREG: —`, `CBC: — (нет)`, при этом
-  `COPS` знает оператора. Фикс — в `internal/modem/urc.go`:
-  `reCREG`/`reCGREG` матчат URC-формат, `+CBC` убран из
-  `tryParseURC` (тип `URCCBC` сохранён для будущего).
-  Регрессионные тесты: `TestExecCREGResponse`,
-  `TestExecCGREGResponse`, `TestExecCBCResponse`.
-- **Вложенные разделители в блоке** — `~~~markdown` с `~~~bash`
-  внутри ломает копирование. Внешний разделитель не должен
-  встречаться в содержимом.
-- **Разрыв файла на части** — «часть 1/2», «продолжение в следующем
-  сообщении» недопустимы. Файл — целиком в одном блоке.
-- **`drainRespCh` крутится в busy loop, если канал закрыт.**
-  После отключения модема `readerLoop` делает `close(a.respCh)`.
-  Следующий `Exec` вызывает `drainRespCh`, где `for/select` читает
-  из `respCh` без проверки `ok`. Чтение из закрытого канала всегда
-  готово, `default` недостижим — вечный busy loop (100% CPU), он же
-  держит `cmdMu`, и все последующие `Exec` навсегда виснут.
-  Фикс: `case _, ok := <-a.respCh; if !ok { return }`.
-
-- **SIGHUP-релоад не перечитывает `.env` (устаревшие env).**
-  `syscall.Exec` передаёт `os.Environ()` родителя, где `SERIAL_PORT`
-  — старые значения. `godotenv.Load` в новом процессе не
-  перезаписывает уже установленные. Фикс: `godotenv.Overload`
-  перед `exec`.
-
-- **Сравнение портов строкой не работает с симлинками.**
-  `PortWatcher` отдаёт `/dev/serial/by-id/...`, а в `.env` может
-  быть кастомный симлинк udev (`/dev/smsgw-akawinsrv`). Фикс:
-  `filepath.EvalSymlinks` на бэкенде, передача флага `active` в SSE.
-
-- **`readerLoop` при `Read == (0, nil)` крутится в busy loop.**
-  CH340 при физическом отключении возвращает `(0, nil)` без
-  блокировки. В `readerLoop` стоял `if n == 0 { continue }` —
-  бесконечный цикл без пауз. Фикс: `select{ctx.Done, time.After(10ms)}`.
-
-- **При переносе модема в другой USB-порт `OpenSerial` падает
-  с `no such file or directory`.** `syscall.Exec` запускает новый
-  процесс мгновенно, а ядру нужно 1-2с, чтобы создать
-  `/dev/ttyUSBx`. Фикс: `OpenSerialWithRetry(60 попыток, 1с)`.
-
+- **Slice-append с указателем**: `r := &m.script[i]` + `append(...)`.
+- **Порядок в Close**: `transport.Close()` -> `wg.Wait()` -> `close()`.
+- **time.Duration в JSON** — int64 наносекунд.
+- **mockModem.SendSMS без References** — service ждёт `res.References[0]`.
+- **Anchors в Python-патчах** — ломаются на gofmt. `replace_func`.
+- **statusKey vs statusLabelKey** — в funcMap нужен `statusLabelKey`.
+- **Shebang** — `#!/bin/bash -euo pipefail` падает.
+- **`git add -A` при грязном дереве** — посторонние файлы в коммите.
+- **Makefile** — табы, а не пробелы (иначе `missing separator`).
+- **Incomplete multipart** — не забывайте удалять `pending_parts` по TTL.
+- **`drainRespCh` busy loop** — при закрытом канале нужен `if !ok { return }`.
+- **SIGHUP reload** — нужен `godotenv.Overload` перед `exec`.
+- **EvalSymlinks** — сравнение портов строкой ломается на симлинках.
+- **`readerLoop` busy loop** — при `(0, nil)` нужен `time.After(10ms)`.
 
 ---
 
 ## 9. Окружение разработчика
 
 - Go 1.26.
-- Репозитории в `/mnt/Data-work/Projects/go-projects/go-smsd/`.
-- `go.work` связывает `sim800ctl` и `smsgateway`.
-- SSH-ключ к GitHub.
-- Hook `prepare-commit-msg` добавляет `Assisted-by: DeepSeek chat`.
-- CI на GitHub Actions: `go mod download`, `go vet`, `go test`,
-  build без CGO, cross-compile (linux/amd64, linux/arm64,
-  linux/armv7, windows/amd64).
-- Два модема SIM800L на удалённой машине (не в текущем
-  окружении): один местный (`stat=1`), один в роуминге
-  (`stat=5`).
+- Forgejo: `https://git.vidya.lv/vidya/smsgateway`.
+- Два модема SIM800L на `rsmodule-tallin1`.
+- Ветка `main`, семвер через `make bump`.
 
 ---
 
 ## 10. Git-версионирование
 
-Semver через git-теги. `git describe --tags --always --dirty`
-поддерживается `Makefile` (`VERSION`). Текущий тег — `v0.1.0`.
-
-Порядок `make build` (после `commit`, до `push`), шаг 0 (чистота
-дерева) и требования к shebang — см. раздел 2 «Обёртка для
-Python-скрипта».
+Текущий тег — `v1.1.0`. `git describe` в `Makefile`.
+Деплой — только через `make deploy` (с защитой от сбоев).
