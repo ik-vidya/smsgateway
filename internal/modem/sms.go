@@ -112,11 +112,11 @@ func (m *Modem) SendSMS(ctx context.Context, peer, text string, opts SendOptions
 		// Пауза между частями. Без неё сеть оператора
 		// блокирует отправку с ошибкой Temporary failure.
 		if i < len(parts)-1 {
-			m.logger.Debug("modem: пауза перед следующей частью", "delay", "2s")
+			m.logger.Debug("modem: пауза перед следующей частью", "delay", "1s")
 			select {
 			case <-ctx.Done():
 				return res, ctx.Err()
-			case <-time.After(2 * time.Second):
+			case <-time.After(1 * time.Second):
 			}
 		}
 	}
