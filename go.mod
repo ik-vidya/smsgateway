@@ -1,9 +1,9 @@
-module github.com/ik-vidya/smsgateway
+module git.vidya.lv/vidya/smsgateway
 
 go 1.26.0
 
 require (
-	github.com/ik-vidya/sim800ctl v0.0.0-20261014110528-5dca6c8ddf8d
+	git.vidya.lv/vidya/sim800ctl v0.0.0-20261020082744-cd2dfcd8fff0
 	github.com/joho/godotenv v1.5.1
 	github.com/nicksnyder/go-i18n/v2 v2.6.1
 	github.com/spf13/cobra v1.10.2

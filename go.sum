@@ -1,3 +1,5 @@
+git.vidya.lv/vidya/sim800ctl v0.0.0-20261020082744-cd2dfcd8fff0 h1:Ke0nJj6yE4LXyMeNqw1D5EIrX6iR/qw7E0JgT9m8bH4=
+git.vidya.lv/vidya/sim800ctl v0.0.0-20261020082744-cd2dfcd8fff0/go.mod h1:MCFxBhbUawdvMDcZBXe1CMw/qYdHpPj9NbcKbQKtsHY=
 github.com/BurntSushi/toml v1.6.0 h1:dRaEfpa2VI55EwlIW72hMRHdWouJeRF7TPYhI+AUQjk=
 github.com/BurntSushi/toml v1.6.0/go.mod h1:ukJfTF/6rtPPRCnwkur4qwRxa8vTRFBF0uk2lLoLwho=
 github.com/cpuguy83/go-md2man/v2 v2.0.6/go.mod h1:oOW0eioCTA6cOiMLiUPZOpcVxMig6NIQQ7OS05n1F4g=
@@ -9,8 +11,6 @@ github.com/google/uuid v1.6.0 h1:NIvaJDMOsjHA8n1jAhLSgzrAzy1Hgr+hNrb57e+94F0=
 github.com/google/uuid v1.6.0/go.mod h1:TIyPZe4MgqvfeYDBFedMoGGpEw/LqOeaOT+nhxU+yHo=
 github.com/hashicorp/golang-lru/v2 v2.0.7 h1:a+bsQ5rvGLjzHuww6tVxozPZFVghXaHOwFs4luLUK2k=
 github.com/hashicorp/golang-lru/v2 v2.0.7/go.mod h1:QeFd9opnmA6QUJc5vARoKUSoFhyfM2/ZepoAG6RGpeM=
-github.com/ik-vidya/sim800ctl v0.0.0-20261014110528-5dca6c8ddf8d h1:LK9nQf4AYXfAM4YJlHFx4uSgil4NA3rC6hkjfSOwMVE=
-github.com/ik-vidya/sim800ctl v0.0.0-20261014110528-5dca6c8ddf8d/go.mod h1:xuurfPQ9uQ7FXmS9rvwRPvp63SRQeYa7LsRp7VIDilE=
 github.com/inconshreveable/mousetrap v1.1.0 h1:wN+x4NVGpMsO7ErUn/mUI3vEoE6Jt13X2s0bqwp9tc8=
 github.com/inconshreveable/mousetrap v1.1.0/go.mod h1:vpF70FUmC8bwa3OWnCshd2FqLfsEA9PFc4w1p2J65bw=
 github.com/joho/godotenv v1.5.1 h1:7eLL/+HRGLY0ldzfGMeQkb7vMd0as4CfYvUVzLqw0N0=

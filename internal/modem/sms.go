@@ -2,7 +2,7 @@
 // отправка (в том числе multipart), чтение, удаление.
 //
 // Отправка работает в PDU-режиме (AT+CMGF=0) с использованием
-// github.com/ik-vidya/sim800ctl/pkg/pdu. ForceUCS2 и RequestDR
+// git.vidya.lv/vidya/sim800ctl/pkg/pdu. ForceUCS2 и RequestDR
 // включаются по настройкам профиля.
 package modem
 
@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ik-vidya/sim800ctl/pkg/pdu"
+	"git.vidya.lv/vidya/sim800ctl/pkg/pdu"
 )
 
 // SendOptions — параметры отправки SMS.

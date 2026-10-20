@@ -11,9 +11,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/ik-vidya/smsgateway/internal/modem"
-	"github.com/ik-vidya/smsgateway/internal/probe"
-	"github.com/ik-vidya/smsgateway/internal/profiles"
+	"git.vidya.lv/vidya/smsgateway/internal/modem"
+	"git.vidya.lv/vidya/smsgateway/internal/probe"
+	"git.vidya.lv/vidya/smsgateway/internal/profiles"
 )
 
 func cmdProbe() *cobra.Command {

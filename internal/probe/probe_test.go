@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ik-vidya/smsgateway/internal/profiles"
+	"git.vidya.lv/vidya/smsgateway/internal/profiles"
 )
 
 // mockModem — карта command → response/error.

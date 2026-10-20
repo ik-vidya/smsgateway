@@ -56,7 +56,7 @@
 
 См. `internal/profiles/sim800.go`. Все обходы снабжены ссылками на
 `docs/SIM800L-NOTES.md` в репозитории
-[sim800ctl](https://github.com/ik-vidya/sim800ctl).
+[sim800ctl](https://git.vidya.lv/vidya/sim800ctl).
 
 ## Добавление нового профиля
 

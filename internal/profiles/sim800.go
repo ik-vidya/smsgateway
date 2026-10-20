@@ -9,7 +9,7 @@ import (
 //
 // Обходит известные баги прошивок, обнаруженные при работе с
 // Revision:1418B04SIM800L24. Полное описание — в репозитории sim800ctl:
-// https://github.com/ik-vidya/sim800ctl/blob/main/docs/SIM800L-NOTES.md
+// https://git.vidya.lv/vidya/sim800ctl/blob/main/docs/SIM800L-NOTES.md
 type SIM800 struct{}
 
 func (SIM800) Name() string { return "sim800" }

@@ -26,10 +26,10 @@ import (
 
 	"github.com/nicksnyder/go-i18n/v2/i18n"
 
-	"github.com/ik-vidya/smsgateway/internal/config"
-	"github.com/ik-vidya/smsgateway/internal/logging"
-	"github.com/ik-vidya/smsgateway/internal/service"
-	"github.com/ik-vidya/smsgateway/internal/storage"
+	"git.vidya.lv/vidya/smsgateway/internal/config"
+	"git.vidya.lv/vidya/smsgateway/internal/logging"
+	"git.vidya.lv/vidya/smsgateway/internal/service"
+	"git.vidya.lv/vidya/smsgateway/internal/storage"
 )
 
 //go:embed templates/*.html templates/partials/*.html

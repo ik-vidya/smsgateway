@@ -19,7 +19,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ik-vidya/sim800ctl/pkg/pdu"
+	"git.vidya.lv/vidya/sim800ctl/pkg/pdu"
 )
 
 // Message — распарсенное содержимое одного Gammu-файла.

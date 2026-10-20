@@ -22,7 +22,7 @@
 
 ## Использование AI-ассистентов
 
-См. аналогичный раздел в репозитории [sim800ctl](https://github.com/ik-vidya/sim800ctl/blob/main/CONTRIBUTING.md).
+См. аналогичный раздел в репозитории [sim800ctl](https://git.vidya.lv/vidya/sim800ctl/blob/main/CONTRIBUTING.md).
 
 ## Стиль
 

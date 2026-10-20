@@ -13,7 +13,7 @@
 ## Сборка
 
 ```bash
-git clone https://github.com/ik-vidya/smsgateway.git
+git clone https://git.vidya.lv/vidya/smsgateway.git
 cd smsgateway
 make build
 ```

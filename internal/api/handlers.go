@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ik-vidya/smsgateway/internal/storage"
+	"git.vidya.lv/vidya/smsgateway/internal/storage"
 )
 
 const maxBodySize = 64 * 1024

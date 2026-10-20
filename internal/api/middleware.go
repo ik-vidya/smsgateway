@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ik-vidya/smsgateway/internal/notify"
+	"git.vidya.lv/vidya/smsgateway/internal/notify"
 )
 
 // withAuth проверяет API-ключ. Пропускает запрос, если ключ валиден.

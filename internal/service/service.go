@@ -11,11 +11,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ik-vidya/smsgateway/internal/diagnostics"
-	"github.com/ik-vidya/smsgateway/internal/gammu"
-	"github.com/ik-vidya/smsgateway/internal/modem"
-	"github.com/ik-vidya/smsgateway/internal/notify"
-	"github.com/ik-vidya/smsgateway/internal/storage"
+	"git.vidya.lv/vidya/smsgateway/internal/diagnostics"
+	"git.vidya.lv/vidya/smsgateway/internal/gammu"
+	"git.vidya.lv/vidya/smsgateway/internal/modem"
+	"git.vidya.lv/vidya/smsgateway/internal/notify"
+	"git.vidya.lv/vidya/smsgateway/internal/storage"
 )
 
 const (

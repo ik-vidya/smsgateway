@@ -14,8 +14,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/ik-vidya/smsgateway/internal/config"
-	"github.com/ik-vidya/smsgateway/internal/modem"
+	"git.vidya.lv/vidya/smsgateway/internal/config"
+	"git.vidya.lv/vidya/smsgateway/internal/modem"
 )
 
 const (

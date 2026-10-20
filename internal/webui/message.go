@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/ik-vidya/smsgateway/internal/storage"
+	"git.vidya.lv/vidya/smsgateway/internal/storage"
 )
 
 // handleMessageDetail — GET /messages/{id}.

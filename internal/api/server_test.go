@@ -13,8 +13,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ik-vidya/smsgateway/internal/config"
-	"github.com/ik-vidya/smsgateway/internal/storage"
+	"git.vidya.lv/vidya/smsgateway/internal/config"
+	"git.vidya.lv/vidya/smsgateway/internal/storage"
 )
 
 const testKey = "test-api-key-12345"

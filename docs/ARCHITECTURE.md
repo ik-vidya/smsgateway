@@ -203,9 +203,9 @@ Web UI, закрывает БД и модем через `sync.Once`), зате�
 
 Импортируются с самого начала:
 
-- `github.com/ik-vidya/sim800ctl/pkg/pdu` — PDU encode/decode
+- `git.vidya.lv/vidya/sim800ctl/pkg/pdu` — PDU encode/decode
   (GSM-7, UCS-2, UDH, multipart);
-- `github.com/ik-vidya/sim800ctl/pkg/number` — нормализация
+- `git.vidya.lv/vidya/sim800ctl/pkg/number` — нормализация
   номеров (зарезервирован для будущего использования).
 
 Локальная разработка — через `go.work`:

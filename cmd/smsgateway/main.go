@@ -16,16 +16,16 @@ import (
 	"github.com/joho/godotenv"
 	"github.com/spf13/cobra"
 
-	"github.com/ik-vidya/smsgateway/internal/api"
-	"github.com/ik-vidya/smsgateway/internal/config"
-	"github.com/ik-vidya/smsgateway/internal/gammu"
-	"github.com/ik-vidya/smsgateway/internal/logging"
-	"github.com/ik-vidya/smsgateway/internal/modem"
-	"github.com/ik-vidya/smsgateway/internal/notify"
-	"github.com/ik-vidya/smsgateway/internal/profiles"
-	"github.com/ik-vidya/smsgateway/internal/service"
-	"github.com/ik-vidya/smsgateway/internal/storage"
-	"github.com/ik-vidya/smsgateway/internal/webui"
+	"git.vidya.lv/vidya/smsgateway/internal/api"
+	"git.vidya.lv/vidya/smsgateway/internal/config"
+	"git.vidya.lv/vidya/smsgateway/internal/gammu"
+	"git.vidya.lv/vidya/smsgateway/internal/logging"
+	"git.vidya.lv/vidya/smsgateway/internal/modem"
+	"git.vidya.lv/vidya/smsgateway/internal/notify"
+	"git.vidya.lv/vidya/smsgateway/internal/profiles"
+	"git.vidya.lv/vidya/smsgateway/internal/service"
+	"git.vidya.lv/vidya/smsgateway/internal/storage"
+	"git.vidya.lv/vidya/smsgateway/internal/webui"
 )
 
 var (

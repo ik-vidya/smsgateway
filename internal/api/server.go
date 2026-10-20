@@ -10,10 +10,10 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/ik-vidya/smsgateway/internal/config"
-	"github.com/ik-vidya/smsgateway/internal/notify"
-	"github.com/ik-vidya/smsgateway/internal/service"
-	"github.com/ik-vidya/smsgateway/internal/storage"
+	"git.vidya.lv/vidya/smsgateway/internal/config"
+	"git.vidya.lv/vidya/smsgateway/internal/notify"
+	"git.vidya.lv/vidya/smsgateway/internal/service"
+	"git.vidya.lv/vidya/smsgateway/internal/storage"
 )
 
 // Server — HTTP-сервер API.

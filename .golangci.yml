@@ -25,7 +25,7 @@ linters:
 
 linters-settings:
   goimports:
-    local-prefixes: github.com/ik-vidya/smsgateway
+    local-prefixes: git.vidya.lv/vidya/smsgateway
   revive:
     rules:
       - name: exported

@@ -19,7 +19,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ik-vidya/smsgateway/internal/profiles"
+	"git.vidya.lv/vidya/smsgateway/internal/profiles"
 )
 
 // Info — идентификация модема.

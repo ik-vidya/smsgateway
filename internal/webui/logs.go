@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ik-vidya/smsgateway/internal/logging"
+	"git.vidya.lv/vidya/smsgateway/internal/logging"
 )
 
 // handleLogs — GET /logs.

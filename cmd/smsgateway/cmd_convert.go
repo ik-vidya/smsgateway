@@ -10,7 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/ik-vidya/smsgateway/internal/gammu"
+	"git.vidya.lv/vidya/smsgateway/internal/gammu"
 )
 
 func cmdConvertGammuConfig() *cobra.Command {

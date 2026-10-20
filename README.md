@@ -48,13 +48,13 @@ HTTP/JSON REST API. Более полная альтернатива `gammu-smsd
 - Go 1.26+ для сборки.
 - AT-совместимый GSM-модем (для реальной работы).
 - Для разработки удобно держать рядом
-  [sim800ctl](https://github.com/ik-vidya/sim800ctl) — см. раздел
+  [sim800ctl](https://git.vidya.lv/vidya/sim800ctl) — см. раздел
   «Связанные проекты».
 
 ## Сборка
 
 ```bash
-git clone https://github.com/ik-vidya/smsgateway.git
+git clone https://git.vidya.lv/vidya/smsgateway.git
 cd smsgateway
 make build
 ```
@@ -334,7 +334,7 @@ smsgateway convert-gammu-config --from /etc/gammu-smsdrc --to smsgateway.env
 
 ## Связанные проекты
 
-- [sim800ctl](https://github.com/ik-vidya/sim800ctl) — CLI-утилита
+- [sim800ctl](https://git.vidya.lv/vidya/sim800ctl) — CLI-утилита
   для работы с SIM800L. Пакеты `pkg/pdu` (PDU encode/decode) и
   `pkg/number` (нормализация номеров) переиспользуются в
   `smsgateway`.

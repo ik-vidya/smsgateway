@@ -22,8 +22,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ik-vidya/sim800ctl/pkg/pdu"
-	"github.com/ik-vidya/smsgateway/internal/profiles"
+	"git.vidya.lv/vidya/sim800ctl/pkg/pdu"
+	"git.vidya.lv/vidya/smsgateway/internal/profiles"
 )
 
 // Transport — минимальный интерфейс для последовательного порта.

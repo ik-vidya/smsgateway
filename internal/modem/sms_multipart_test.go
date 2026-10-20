@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ik-vidya/smsgateway/internal/profiles"
+	"git.vidya.lv/vidya/smsgateway/internal/profiles"
 )
 
 // Длинный текст (215 символов ASCII) → 2 части GSM-7.

@@ -1,13 +1,13 @@
 # Связанные проекты
 
 `smsgateway` использует пакеты из
-[sim800ctl](https://github.com/ik-vidya/sim800ctl):
+[sim800ctl](https://git.vidya.lv/vidya/sim800ctl):
 
-- `github.com/ik-vidya/sim800ctl/pkg/pdu` — PDU encode/decode
+- `git.vidya.lv/vidya/sim800ctl/pkg/pdu` — PDU encode/decode
   (GSM-7, UCS-2, UDH, multipart). Используется в
   `internal/modem/sms.go` (отправка/приём) и
   `internal/gammu/parse.go` (декодирование PDU из Gammu-файла).
-- `github.com/ik-vidya/sim800ctl/pkg/number` — нормализация
+- `git.vidya.lv/vidya/sim800ctl/pkg/number` — нормализация
   номеров. Зарезервирован для будущего использования.
 
 ## Локальная разработка через go.work
@@ -41,18 +41,18 @@ use (
 ```
 
 После этого из `smsgateway` доступны импорты
-`github.com/ik-vidya/sim800ctl/pkg/pdu` и т.д., и изменения
+`git.vidya.lv/vidya/sim800ctl/pkg/pdu` и т.д., и изменения
 в `sim800ctl` сразу видны в `smsgateway`.
 
 ## go.mod smsgateway
 
 ```go
-module github.com/ik-vidya/smsgateway
+module git.vidya.lv/vidya/smsgateway
 
 go 1.26
 
 require (
-    github.com/ik-vidya/sim800ctl v0.0.0-...
+    git.vidya.lv/vidya/sim800ctl v0.0.0-...
     ...
 )
 ```
@@ -91,14 +91,14 @@ GOWORK=off go mod tidy -v
 
 ```bash
 cd smsgateway
-go get github.com/ik-vidya/sim800ctl@latest
+go get git.vidya.lv/vidya/sim800ctl@latest
 go mod tidy
 ```
 
 При локальной разработке без релиза — `replace` в `go.mod`:
 
 ```go
-replace github.com/ik-vidya/sim800ctl => ../sim800ctl
+replace git.vidya.lv/vidya/sim800ctl => ../sim800ctl
 ```
 
 Но это только для локальной работы; в CI `replace` убирают

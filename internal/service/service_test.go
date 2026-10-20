@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ik-vidya/smsgateway/internal/modem"
-	"github.com/ik-vidya/smsgateway/internal/storage"
+	"git.vidya.lv/vidya/smsgateway/internal/modem"
+	"git.vidya.lv/vidya/smsgateway/internal/storage"
 )
 
 // ==================== MockModem ====================
