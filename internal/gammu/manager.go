@@ -57,7 +57,7 @@ type Sender interface {
 // *storage.Store удовлетворяет этому интерфейсу.
 type OutboxStore interface {
 	// Сообщения.
-	CreateOutboxMessage(ctx context.Context, peer, text string) (int64, error)
+	CreateOutboxMessage(ctx context.Context, peer, text string, gammuSerial int, createdAt time.Time) (int64, error)
 	MarkOutboxSending(ctx context.Context, id int64) error
 	MarkOutboxSent(ctx context.Context, id, reference int64) error
 	MarkOutboxFailed(ctx context.Context, id int64, errMsg string) error
@@ -451,7 +451,11 @@ func (m *Manager) processFile(ctx context.Context, name string) (fileResult, err
 
 	case errors.Is(entryErr, ErrOutboxEntryNotFound):
 		// Свежий файл: создаём message и entry.
-		id, err := m.store.CreateOutboxMessage(ctx, recipient, text)
+		createdAt := fn.Time
+		if createdAt.IsZero() {
+			createdAt = time.Now()
+		}
+		id, err := m.store.CreateOutboxMessage(ctx, recipient, text, fn.Serial, createdAt)
 		if err != nil {
 			return resultSkipped, fmt.Errorf("CreateOutboxMessage: %w", err)
 		}

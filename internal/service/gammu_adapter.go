@@ -8,6 +8,7 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -81,14 +82,18 @@ func NewStorageOutboxStore(store *storage.Store) *StorageOutboxStore {
 // CreateOutboxMessage создаёт исходящее сообщение со
 // source='gammu-outbox' и status='queued'.
 func (a *StorageOutboxStore) CreateOutboxMessage(ctx context.Context,
-	peer, text string) (int64, error) {
+	peer, text string, gammuSerial int, createdAt time.Time) (int64, error) {
 
 	m := &storage.Message{
-		Direction: storage.DirectionOut,
-		Status:    storage.StatusQueued,
-		Source:    storage.SourceGammuOutbox,
-		Peer:      peer,
-		Text:      text,
+		Direction:   storage.DirectionOut,
+		Status:      storage.StatusQueued,
+		Source:      storage.SourceGammuOutbox,
+		Peer:        peer,
+		Text:        text,
+		GammuSerial: sql.NullInt64{Int64: int64(gammuSerial), Valid: true},
+	}
+	if !createdAt.IsZero() {
+		m.CreatedAt = createdAt
 	}
 	return a.store.CreateMessage(ctx, m)
 }

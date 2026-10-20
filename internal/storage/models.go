@@ -76,10 +76,11 @@ type Message struct {
 	RawPDU    string
 
 	// Исходящие
-	Reference  sql.NullInt64
-	TPMR       sql.NullInt64
-	RetryCount int
-	Error      string
+	Reference   sql.NullInt64
+	TPMR        sql.NullInt64
+	GammuSerial sql.NullInt64
+	RetryCount  int
+	Error       string
 
 	// Жизненный цикл
 	QueuedAt    sql.NullTime

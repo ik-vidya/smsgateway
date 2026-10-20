@@ -810,6 +810,17 @@ func (s *Service) HandleDeliveryReport(ctx context.Context, ref int, tpst int, r
 	if err := s.store.ReleaseReference(ctx, int64(ref)); err != nil {
 		s.logger.Warn("service: ReleaseReference", "ref", ref, "err", err)
 	}
+
+	if msg, err := s.store.GetMessage(ctx, msgID); err == nil {
+		if msg.GammuSerial.Valid && s.gammu != nil {
+			delivered := (tpst == 0x00)
+			_, err := s.gammu.Inbox().WriteDeliveryReport(int(msg.GammuSerial.Int64), msg.Peer, delivered)
+			if err != nil {
+				s.logger.Warn("service: WriteDeliveryReport", "err", err, "serial", msg.GammuSerial.Int64)
+			}
+		}
+	}
+
 	s.logger.Info("service: DR обработан",
 		"ref", ref, "msg_id", msgID, "tpst", tpst)
 	return nil

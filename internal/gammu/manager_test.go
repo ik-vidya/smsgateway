@@ -85,7 +85,7 @@ func newMockStore() *mockStore {
 	}
 }
 
-func (m *mockStore) CreateOutboxMessage(_ context.Context, _, _ string) (int64, error) {
+func (m *mockStore) CreateOutboxMessage(_ context.Context, _, _ string, _ int, _ time.Time) (int64, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.nextID++

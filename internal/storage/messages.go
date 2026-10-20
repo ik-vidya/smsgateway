@@ -39,15 +39,15 @@ func (s *Store) CreateMessage(ctx context.Context, m *Message) (int64, error) {
 	res, err := s.db.ExecContext(ctx, `
 		INSERT INTO messages (
 			direction, status, source, peer, text, raw_pdu,
-			reference, tp_mr, retry_count, error,
+			reference, tp_mr, gammu_serial, retry_count, error,
 			queued_at, sent_at, delivered_at,
 			created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		string(m.Direction), string(m.Status),
 		nullString(string(m.Source)), m.Peer,
 		nullString(m.Text), nullString(m.RawPDU),
-		m.Reference, m.TPMR, m.RetryCount,
+		m.Reference, m.TPMR, m.GammuSerial, m.RetryCount,
 		nullString(m.Error),
 		m.QueuedAt, m.SentAt, m.DeliveredAt,
 		m.CreatedAt, now,
@@ -326,7 +326,7 @@ type rowScanner interface {
 // messageColumns — единый список колонок для SELECT из messages.
 // Порядок ДОЛЖЕН совпадать с scanMessage.
 const messageColumns = `id, direction, status, source, peer, text, raw_pdu,
-	reference, tp_mr, retry_count, error,
+	reference, tp_mr, gammu_serial, retry_count, error,
 	queued_at, sent_at, delivered_at,
 	created_at, updated_at`
 
@@ -337,7 +337,7 @@ func scanMessage(sc rowScanner) (*Message, error) {
 
 	if err := sc.Scan(
 		&m.ID, &direction, &status, &source, &m.Peer, &text, &rawPDU,
-		&m.Reference, &m.TPMR, &m.RetryCount, &errMsg,
+		&m.Reference, &m.TPMR, &m.GammuSerial, &m.RetryCount, &errMsg,
 		&m.QueuedAt, &m.SentAt, &m.DeliveredAt,
 		&m.CreatedAt, &m.UpdatedAt,
 	); err != nil {

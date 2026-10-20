@@ -226,3 +226,43 @@ func encodeUTF16LEWithBOM(s string) []byte {
 	}
 	return out
 }
+
+// WriteDeliveryReport создаёт файл-отчёт о доставке в папке inbox.
+// Имя файла: IN<date>_<serial>_<peer>_00.txt
+func (w *InboxWriter) WriteDeliveryReport(serial int, peer string, delivered bool) (string, error) {
+	if serial <= 0 {
+		return "", fmt.Errorf("некорректный serial: %d", serial)
+	}
+	if peer == "" {
+		return "", errors.New("peer обязателен")
+	}
+	if err := os.MkdirAll(w.dir, 0o755); err != nil {
+		return "", fmt.Errorf("создание каталога %q: %w", w.dir, err)
+	}
+
+	now := time.Now()
+	text := "DELIVERED"
+	if !delivered {
+		text = "FAILED"
+	}
+
+	base := fmt.Sprintf("IN%s_%d_%s_00.txt",
+		now.Local().Format("20060102_150405"), serial, sanitizeSender(peer))
+	full := filepath.Join(w.dir, base)
+
+	var body []byte
+	switch w.format {
+	case "utf8":
+		body = []byte(text)
+	case "unicode":
+		body = encodeUTF16LEWithBOM(text)
+	default:
+		return "", fmt.Errorf("внутренняя ошибка: формат %q", w.format)
+	}
+
+	if err := os.WriteFile(full, body, 0o644); err != nil {
+		return "", fmt.Errorf("запись %q: %w", full, err)
+	}
+	w.logger.Info("gammu: DR-файл записан", "path", full, "serial", serial, "delivered", delivered)
+	return full, nil
+}

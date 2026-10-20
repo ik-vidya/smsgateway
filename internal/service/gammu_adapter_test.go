@@ -138,7 +138,7 @@ func TestStorageOutboxCreateAndGet(t *testing.T) {
 	a := NewStorageOutboxStore(store)
 	ctx := context.Background()
 
-	id, err := a.CreateOutboxMessage(ctx, "+37121234567", "hi")
+	id, err := a.CreateOutboxMessage(ctx, "+37121234567", "hi", 123, time.Now())
 	if err != nil {
 		t.Fatalf("CreateOutboxMessage: %v", err)
 	}
@@ -187,7 +187,7 @@ func TestStorageOutboxUpdateFailure(t *testing.T) {
 	a := NewStorageOutboxStore(store)
 	ctx := context.Background()
 
-	id, _ := a.CreateOutboxMessage(ctx, "+371", "x")
+	id, _ := a.CreateOutboxMessage(ctx, "+371", "x", 0, time.Now())
 	pathA := "/tmp/outbox/OUTA_+371_00.txt"
 	pathB := "/tmp/outbox/OUTB_+371_00.txt"
 
@@ -216,7 +216,7 @@ func TestStorageOutboxMarkTransitions(t *testing.T) {
 	a := NewStorageOutboxStore(store)
 	ctx := context.Background()
 
-	id, _ := a.CreateOutboxMessage(ctx, "+371", "x")
+	id, _ := a.CreateOutboxMessage(ctx, "+371", "x", 0, time.Now())
 
 	if err := a.MarkOutboxSending(ctx, id); err != nil {
 		t.Fatalf("MarkOutboxSending: %v", err)
