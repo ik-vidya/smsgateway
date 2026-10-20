@@ -592,3 +592,38 @@ func (s *Server) handleMessageRetry(w http.ResponseWriter, r *http.Request) {
 	s.logger.Info("webui: сообщение поставлено на повторную отправку", "old_id", id, "new_id", newID)
 	http.Redirect(w, r, "/outbox", http.StatusSeeOther)
 }
+
+// handleMessageCancel — POST /messages/{id}/cancel.
+//
+// Отменяет отправку сообщения, если оно ещё в очереди.
+// Переводит статус в failed с пометкой "Отменено пользователем".
+func (s *Server) handleMessageCancel(w http.ResponseWriter, r *http.Request) {
+	id, err := parseIDPath(r.PathValue("id"))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	msg, err := s.store.GetMessage(r.Context(), id)
+	if err != nil {
+		http.Error(w, "message not found", http.StatusNotFound)
+		return
+	}
+
+	if msg.Status != storage.StatusQueued {
+		http.Error(w, "only queued messages can be canceled", http.StatusBadRequest)
+		return
+	}
+
+	// Переводим в failed. Если sendLoop уже успел перевести
+	// в sending, UpdateStatus вернёт ошибку недопустимого перехода.
+	err = s.store.MarkFailed(r.Context(), id, "Отменено пользователем")
+	if err != nil {
+		s.logger.Warn("webui: cancel MarkFailed", "err", err, "id", id)
+		http.Error(w, "message is already sending", http.StatusConflict)
+		return
+	}
+
+	s.logger.Info("webui: сообщение отменено пользователем", "id", id)
+	http.Redirect(w, r, "/outbox", http.StatusSeeOther)
+}

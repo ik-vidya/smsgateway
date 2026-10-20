@@ -64,6 +64,7 @@
   "message.reports": "Отчёты о доставке",
   "message.reports.empty": "Отчётов о доставке пока нет.",
   "message.title": "Сообщение",
+  "messages.cancel": "Отменить",
   "messages.col.created_at": "Создано",
   "messages.col.date": "Дата",
   "messages.col.delivered_at": "Доставлено",

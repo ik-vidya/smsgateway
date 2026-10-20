@@ -64,6 +64,7 @@
   "message.reports": "Piegādes atskaites",
   "message.reports.empty": "Piegādes atskaišu vēl nav.",
   "message.title": "Ziņa",
+  "messages.cancel": "Atcelt",
   "messages.col.created_at": "Izveidots",
   "messages.col.date": "Datums",
   "messages.col.delivered_at": "Piegādāts",

@@ -64,6 +64,7 @@
   "message.reports": "Delivery reports",
   "message.reports.empty": "No delivery reports yet.",
   "message.title": "Message",
+  "messages.cancel": "Cancel",
   "messages.col.created_at": "Created",
   "messages.col.date": "Date",
   "messages.col.delivered_at": "Delivered",
