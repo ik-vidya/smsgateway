@@ -157,6 +157,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /compose", s.handleComposeForm)
 	mux.HandleFunc("POST /compose", s.handleComposeSubmit)
 	mux.HandleFunc("GET /messages/{id}", s.handleMessageDetail)
+	mux.HandleFunc("POST /messages/{id}/retry", s.handleMessageRetry)
 	mux.HandleFunc("GET /logs", s.handleLogs)
 	mux.HandleFunc("GET /logs/stream", s.handleLogsStream)
 	mux.HandleFunc("GET /logs/download", s.handleLogsDownload)

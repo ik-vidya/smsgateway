@@ -53,6 +53,15 @@
                     <dd class="col-sm-7 text-danger">{{ .Message.Error }}</dd>
                     {{ end }}
 
+                    {{ if eq .Message.Status "failed" }}
+                    <dt class="col-sm-5">{{ T . "messages.retry" }}</dt>
+                    <dd class="col-sm-7">
+                        <form method="post" action="/messages/{{ .Message.ID }}/retry">
+                            <button type="submit" class="btn btn-sm btn-warning">{{ T . "messages.retry" }}</button>
+                        </form>
+                    </dd>
+                    {{ end }}
+
                     <dt class="col-sm-5">{{ T . "messages.col.created_at" }}</dt>
                     <dd class="col-sm-7">{{ fmtTime .Message.CreatedAt }}</dd>
 

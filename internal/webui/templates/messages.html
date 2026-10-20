@@ -40,6 +40,14 @@
                placeholder="+371..." autocomplete="off">
     </div>
 
+    <div class="col-md-3">
+        <label for="text" class="form-label small mb-1">{{ T . "messages.filters.text" }}</label>
+        <input type="text" class="form-control form-control-sm"
+               id="text" name="text"
+               value="{{ .Filters.Text }}"
+               placeholder="..." autocomplete="off">
+    </div>
+
     <div class="col-md-2">
         <label for="status" class="form-label small mb-1">{{ T . "messages.filters.status" }}</label>
         <select class="form-select form-select-sm" id="status" name="status">

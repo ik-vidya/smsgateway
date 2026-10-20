@@ -151,6 +151,10 @@ func buildWhere(f Filter) (string, []any) {
 		conds = append(conds, "peer LIKE ?")
 		args = append(args, "%"+f.Peer+"%")
 	}
+	if f.Text != "" {
+		conds = append(conds, "text LIKE ?")
+		args = append(args, "%"+f.Text+"%")
+	}
 	if f.Since != nil {
 		conds = append(conds, "created_at >= ?")
 		args = append(args, *f.Since)

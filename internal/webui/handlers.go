@@ -199,6 +199,7 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request,
 		Direction: dir,
 		Status:    filters.Status,
 		Peer:      filters.Peer,
+		Text:      filters.Text,
 		Since:     filters.Since,
 		Until:     filters.Until,
 		Limit:     filters.Limit,
@@ -306,6 +307,7 @@ func (s *Server) isSupportedLang(code string) bool {
 // из query — нужны для подстановки в форму и в URL пагинации.
 type messagesFilters struct {
 	Peer        string
+	Text        string
 	Status      storage.Status
 	StatusValue string
 	Since       *time.Time
@@ -325,6 +327,7 @@ func parseMessagesFilters(r *http.Request) (messagesFilters, error) {
 	q := r.URL.Query()
 	f := messagesFilters{
 		Peer:  strings.TrimSpace(q.Get("peer")),
+		Text:  strings.TrimSpace(q.Get("text")),
 		Limit: defaultMessagesLimit,
 	}
 
@@ -381,6 +384,9 @@ func buildPaginationURL(basePath string, f messagesFilters, offset int) string {
 	v := url.Values{}
 	if f.Peer != "" {
 		v.Set("peer", f.Peer)
+	}
+	if f.Text != "" {
+		v.Set("text", f.Text)
 	}
 	if f.StatusValue != "" {
 		v.Set("status", f.StatusValue)
@@ -546,4 +552,43 @@ func statusBadge(st storage.Status) string {
 		return "bg-warning text-dark"
 	}
 	return "bg-secondary"
+}
+
+// handleMessageRetry — POST /messages/{id}/retry.
+//
+// Создает копию failed-сообщения в очереди (status=queued).
+func (s *Server) handleMessageRetry(w http.ResponseWriter, r *http.Request) {
+	id, err := parseIDPath(r.PathValue("id"))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	msg, err := s.store.GetMessage(r.Context(), id)
+	if err != nil {
+		http.Error(w, "message not found", http.StatusNotFound)
+		return
+	}
+
+	if msg.Status != storage.StatusFailed {
+		http.Error(w, "only failed messages can be retried", http.StatusBadRequest)
+		return
+	}
+
+	newMsg := &storage.Message{
+		Direction: storage.DirectionOut,
+		Status:    storage.StatusQueued,
+		Source:    storage.SourceAPI,
+		Peer:      msg.Peer,
+		Text:      msg.Text,
+	}
+	newID, err := s.store.CreateMessage(r.Context(), newMsg)
+	if err != nil {
+		s.logger.Error("webui: retry CreateMessage", "err", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	s.logger.Info("webui: сообщение поставлено на повторную отправку", "old_id", id, "new_id", newID)
+	http.Redirect(w, r, "/outbox", http.StatusSeeOther)
 }

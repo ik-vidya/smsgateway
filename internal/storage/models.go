@@ -130,6 +130,7 @@ type Filter struct {
 	Status    Status     // пусто — все
 	Source    Source     // пусто — все
 	Peer      string     // подстрока; пусто — все
+	Text      string     // подстрока; пусто — все
 	Since     *time.Time // created_at >= since
 	Until     *time.Time // created_at < until
 	Limit     int        // 0 — значение по умолчанию (50)
