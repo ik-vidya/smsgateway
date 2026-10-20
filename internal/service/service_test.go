@@ -688,3 +688,64 @@ func TestSendTestSMSWithReceive_OK(t *testing.T) {
 			res.Received.Text, res.Marker)
 	}
 }
+
+// TestURCCMTIMultipart проверяет сборку длинных SMS из нескольких частей.
+func TestURCCMTIMultipart(t *testing.T) {
+	mock := newMockModem()
+	// Эмулируем 2 части одного сообщения
+	mock.readSMSResult = []modem.SMSMessage{
+		{
+			Index:  5,
+			Status: "REC UNREAD",
+			Peer:   "+37121234567",
+			Text:   "Part 1. ",
+			Multipart: &modem.MultipartInfo{
+				Reference: 42, Total: 2, Sequence: 1,
+			},
+		},
+		{
+			Index:  6,
+			Status: "REC UNREAD",
+			Peer:   "+37121234567",
+			Text:   "Part 2.",
+			Multipart: &modem.MultipartInfo{
+				Reference: 42, Total: 2, Sequence: 2,
+			},
+		},
+	}
+	svc, store := newTestService(t, mock)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = svc.Run(ctx) }()
+	time.Sleep(50 * time.Millisecond)
+
+	// Приходит первая часть
+	mock.urcCh <- modem.URCCMTI{Mem: "SM", Index: 5}
+	time.Sleep(150 * time.Millisecond)
+
+	// В БД пока пусто
+	_, total, _ := store.ListMessages(ctx, storage.Filter{Direction: storage.DirectionIn})
+	if total != 0 {
+		t.Fatalf("после 1-й части total=%d, ожидалось 0", total)
+	}
+
+	// Приходит вторая часть
+	mock.urcCh <- modem.URCCMTI{Mem: "SM", Index: 6}
+	time.Sleep(150 * time.Millisecond)
+	cancel()
+
+	// Теперь должна быть одна полная запись
+	msgs, total, _ := store.ListMessages(context.Background(), storage.Filter{
+		Direction: storage.DirectionIn,
+	})
+	if total != 1 {
+		t.Fatalf("после 2-й части total=%d, ожидалось 1", total)
+	}
+	if msgs[0].Text != "Part 1. Part 2." {
+		t.Errorf("собранный текст: %q, ожидалось %q", msgs[0].Text, "Part 1. Part 2.")
+	}
+	if len(mock.deletedIndexes) != 2 {
+		t.Errorf("deleted=%v, ожидалось [5 6]", mock.deletedIndexes)
+	}
+}

@@ -539,6 +539,40 @@ func (s *Service) ingestSMS(ctx context.Context, index int) error {
 		return fmt.Errorf("SMS с index=%d не найдена", index)
 	}
 
+	var finalText, finalRawPDU string
+
+	// Проверяем, является ли SMS частью multipart-сообщения.
+	if target.Multipart != nil {
+		mp := target.Multipart
+		complete, fullText, err := s.store.SavePendingPart(
+			ctx, int64(mp.Reference), target.Peer, mp.Total, mp.Sequence, target.Text,
+		)
+		if err != nil {
+			return fmt.Errorf("SavePendingPart: %w", err)
+		}
+
+		if !complete {
+			// Ещё не все части пришли. Удаляем из памяти модема и выходим.
+			s.logger.Info("service: получена часть multipart SMS",
+				"ref", mp.Reference, "seq", mp.Sequence, "total", mp.Total)
+			if s.deleteAfterRead {
+				_ = s.modem.DeleteSMS(ctx, index)
+			}
+			return nil
+		}
+
+		// Все части собраны.
+		s.logger.Info("service: multipart SMS собрано",
+			"ref", mp.Reference, "total", mp.Total, "len", len(fullText))
+		finalText = fullText
+		finalRawPDU = target.RawPDU // PDU последней части
+	} else {
+		// Обычное одиночное SMS.
+		finalText = target.Text
+		finalRawPDU = target.RawPDU
+	}
+
+	// Дедупликация (проверяем по финальному тексту).
 	existing, _, err := s.store.ListMessages(ctx, storage.Filter{
 		Direction: storage.DirectionIn,
 		Peer:      target.Peer,
@@ -547,7 +581,7 @@ func (s *Service) ingestSMS(ctx context.Context, index int) error {
 	if err != nil {
 		return fmt.Errorf("дедупликация: %w", err)
 	}
-	if len(existing) > 0 && existing[0].Text == target.Text {
+	if len(existing) > 0 && existing[0].Text == finalText {
 		if s.deleteAfterRead {
 			_ = s.modem.DeleteSMS(ctx, index)
 		}
@@ -558,18 +592,17 @@ func (s *Service) ingestSMS(ctx context.Context, index int) error {
 		Direction: storage.DirectionIn,
 		Status:    storage.StatusReceived,
 		Peer:      target.Peer,
-		Text:      target.Text,
-		RawPDU:    target.RawPDU,
+		Text:      finalText,
+		RawPDU:    finalRawPDU,
 	}
 	id, err := s.store.CreateMessage(ctx, m)
 	if err != nil {
 		return fmt.Errorf("CreateMessage: %w", err)
 	}
 	s.logger.Info("service: SMS сохранено",
-		"id", id, "peer", target.Peer, "len", len(target.Text))
+		"id", id, "peer", target.Peer, "len", len(finalText))
 
 	// Экспорт в Gammu inbox (если файловый бэкенд активен).
-	// Ошибка файла не блокирует приём — БД уже обновлена.
 	s.writeToGammuInbox(target, id)
 
 	if s.deleteAfterRead {
