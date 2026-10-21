@@ -673,18 +673,15 @@ func (s *Service) sendOne(ctx context.Context, msg *storage.Message) {
 
 	res, attempts, err := s.sendWithRetry(ctx, msg)
 	if err != nil {
-		// При ошибке отправки собираем контекст сети,
-		// чтобы было понятно, почему сеть отказала.
-		creg, _ := s.modem.Exec(ctx, "AT+CREG?")
-		cops, _ := s.modem.Exec(ctx, "AT+COPS?")
-		csq, _ := s.modem.Exec(ctx, "AT+CSQ")
-
 		s.logger.Warn("service: SendSMS не удалось",
 			"id", msg.ID, "attempts", attempts,
 			"parts_sent", len(res.References),
-			"err", err,
-			"creg", creg, "cops", cops, "csq", csq)
+			"err", err)
 		_ = s.store.MarkFailed(ctx, msg.ID, err.Error())
+
+		s.notifier.Notify(ctx, notify.LevelError, fmt.Errorf(
+			"%s: SMS to %s failed after %d attempts: %v",
+			s.modemDesc, msg.Peer, attempts, err))
 		return
 	}
 
