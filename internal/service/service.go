@@ -31,11 +31,12 @@ var DefaultSendBackoff = []time.Duration{
 
 // Service — координатор.
 type Service struct {
-	modem     Modem
-	modemDesc string
-	store     *storage.Store
-	logger    *slog.Logger
-	notifier  notify.Notifier
+	modem        Modem
+	modemDesc    string
+	telegramLang string
+	store        *storage.Store
+	logger       *slog.Logger
+	notifier     notify.Notifier
 
 	// gammu опционален: nil, если GAMMU_ROOT не задан или
 	// файловый бэкенд отключён.
@@ -103,6 +104,7 @@ type Config struct {
 	SelfNumber       string
 	TestSMSTimeout   time.Duration
 	ModemDescription string
+	TelegramLang     string
 
 	Notifier notify.Notifier
 
@@ -152,6 +154,7 @@ func New(m Modem, store *storage.Store, logger *slog.Logger, cfg Config) *Servic
 		sendBackoff:     cfg.SendBackoff,
 		selfNumber:      cfg.SelfNumber,
 		modemDesc:       cfg.ModemDescription,
+		telegramLang:    cfg.TelegramLang,
 		testSMSTimeout:  cfg.TestSMSTimeout,
 		notifier:        cfg.Notifier,
 		gammu:           cfg.Gammu,
@@ -169,10 +172,9 @@ func (s *Service) Run(ctx context.Context) error {
 		return err
 	}
 
-	info := s.ModemInfo()
 	s.notifier.Notify(ctx, notify.LevelOK, fmt.Errorf(
-		"%s: modem initialized (IMEI: %s)",
-		s.modemDesc, info.IMEI))
+		"%s: %s",
+		s.modemDesc, s.msg("модем инициализирован", "modems inicializēts", "modem initialized")))
 
 	// Восстановление «сирот»: сообщения source='gammu-outbox'
 	// без записи в gammu_outbox (сервис упал между записью в БД
@@ -242,6 +244,17 @@ func (s *Service) recoverGammuOrphans(ctx context.Context) {
 			s.logger.Warn("service: MarkFailed для сироты",
 				"id", m.ID, "err", err)
 		}
+	}
+}
+
+func (s *Service) msg(ru, lv, en string) string {
+	switch s.telegramLang {
+	case "en":
+		return en
+	case "lv":
+		return lv
+	default:
+		return ru
 	}
 }
 
@@ -457,7 +470,10 @@ func (s *Service) urcLoop(ctx context.Context, cancel context.CancelFunc) {
 		case u, ok := <-urcCh:
 			if !ok {
 				s.logger.Error("service: URC-канал закрыт (модем отключен)")
-				s.setFatalErr(fmt.Errorf("URC канал закрыт (модем отключен)"))
+				s.setFatalErr(fmt.Errorf("%s", s.msg(
+					"URC канал закрыт (модем отключен)",
+					"URC kanāls aizvērts (modems atvienots)",
+					"URC channel closed (modem disconnected)")))
 				cancel()
 				return
 			}
@@ -680,7 +696,9 @@ func (s *Service) sendOne(ctx context.Context, msg *storage.Message) {
 		_ = s.store.MarkFailed(ctx, msg.ID, err.Error())
 
 		s.notifier.Notify(ctx, notify.LevelError, fmt.Errorf(
-			"%s: SMS to %s failed after %d attempts: %v",
+			"%s: "+s.msg("СМС на %s не отправлено после %d попыток: %v",
+				"SMS uz %s netika nosūtīta pēc %d mēģinājumiem: %v",
+				"SMS to %s failed after %d attempts: %v"),
 			s.modemDesc, msg.Peer, attempts, err))
 		return
 	}
@@ -713,7 +731,9 @@ func (s *Service) sendOne(ctx context.Context, msg *storage.Message) {
 
 	if attempts > 1 {
 		s.notifier.Notify(ctx, notify.LevelOK, fmt.Errorf(
-			"%s: SMS to %s sent after %d attempts (refs: %v)",
+			"%s: "+s.msg("СМС на %s отправлено после %d попыток (refs: %v)",
+				"SMS uz %s nosūtīta pēc %d mēģinājumiem (refs: %v)",
+				"SMS to %s sent after %d attempts (refs: %v)"),
 			s.modemDesc, msg.Peer, attempts, refs))
 	}
 }

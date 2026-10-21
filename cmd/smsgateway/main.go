@@ -346,6 +346,7 @@ func runService(_ *cobra.Command, _ []string) error {
 		DeleteAfterRead:  cfg.SMSDeleteAfterRead,
 		SelfNumber:       cfg.SelfNumber,
 		ModemDescription: cfg.ModemDescription,
+		TelegramLang:     cfg.TelegramLang,
 		TestSMSTimeout:   cfg.TestSMSTimeout,
 		Notifier:         notifier,
 		Gammu:            gammuMgr,
@@ -385,6 +386,19 @@ func runService(_ *cobra.Command, _ []string) error {
 	select {
 	case <-ctx.Done():
 		logger.Info("получен сигнал остановки")
+
+		// Уведомляем об остановке до начала shutdown
+		stopMsg := "Сервис остановлен"
+		if cfg.TelegramLang == "en" {
+			stopMsg = "Service stopped"
+		} else if cfg.TelegramLang == "lv" {
+			stopMsg = "Serviss apturēts"
+		}
+		if cfg.ModemDescription != "" {
+			stopMsg = cfg.ModemDescription + ": " + stopMsg
+		}
+		notifier.Notify(ctx, notify.LevelWarning, fmt.Errorf("%s", stopMsg))
+
 		shutdownCtx, cancel := context.WithTimeout(
 			context.Background(), 10*time.Second)
 		defer cancel()

@@ -59,6 +59,7 @@ type Config struct {
 	// Telegram
 	TelegramBotToken string
 	TelegramChatID   string
+	TelegramLang     string
 
 	// Web UI
 	WebUIEnabled     bool
@@ -98,6 +99,7 @@ func Load(path string) (*Config, error) {
 		SelfNumber:       os.Getenv("SELF_NUMBER"),
 		TelegramBotToken: os.Getenv("TELEGRAM_BOT_TOKEN"),
 		TelegramChatID:   os.Getenv("TELEGRAM_CHAT_ID"),
+		TelegramLang:     envDefault("TELEGRAM_LANG", "ru"),
 		WebUIAddr:        envDefault("WEBUI_ADDR", "127.0.0.1:8081"),
 		WebUIAuthMode:    envDefault("WEBUI_AUTH_MODE", "none"),
 		WebUIAuthUser:    os.Getenv("WEBUI_AUTH_USER"),
@@ -213,6 +215,13 @@ func (c *Config) validate() error {
 	// Telegram: либо оба параметра, либо ни одного.
 	hasToken := strings.TrimSpace(c.TelegramBotToken) != ""
 	hasChat := strings.TrimSpace(c.TelegramChatID) != ""
+	switch strings.ToLower(c.TelegramLang) {
+	case "ru", "lv", "en":
+	default:
+		errs = append(errs, fmt.Errorf(
+			"TELEGRAM_LANG должен быть ru|lv|en, получено %q", c.TelegramLang))
+	}
+
 	if hasToken != hasChat {
 		errs = append(errs, errors.New(
 			"TELEGRAM_BOT_TOKEN и TELEGRAM_CHAT_ID должны быть заданы вместе"))
