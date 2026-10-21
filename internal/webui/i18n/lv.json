@@ -1,4 +1,6 @@
 {
+  "app.footer.contact": "Kontakti",
+  "app.footer.source": "Pirmkods",
   "app.footer.version": "Versija",
   "app.subtitle": "SMS vārteja",
   "app.title": "smsgateway",

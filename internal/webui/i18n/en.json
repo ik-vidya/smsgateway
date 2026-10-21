@@ -1,4 +1,6 @@
 {
+  "app.footer.contact": "Contact",
+  "app.footer.source": "Source Code",
   "app.footer.version": "Version",
   "app.subtitle": "SMS gateway",
   "app.title": "smsgateway",

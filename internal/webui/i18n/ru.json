@@ -1,4 +1,6 @@
 {
+  "app.footer.contact": "Связаться",
+  "app.footer.source": "Исходный код",
   "app.footer.version": "Версия",
   "app.subtitle": "SMS-шлюз",
   "app.title": "smsgateway",

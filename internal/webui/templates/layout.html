@@ -20,8 +20,21 @@
 
 <footer class="container text-muted small my-4">
     <hr>
-    {{ T . "app.title" }} — {{ T . "app.subtitle" }}.
-    {{ T . "app.footer.version" }}: <code>{{ .Version }}</code>
+    <div class="d-flex flex-column flex-md-row justify-content-between align-items-center gap-2">
+        <div>
+            {{ T . "app.title" }} — {{ T . "app.subtitle" }}.
+        </div>
+        <div class="d-flex align-items-center flex-wrap gap-3">
+            <span>&copy; IK Vidya</span>
+            <a href="https://git.vidya.lv/vidya/smsgateway" target="_blank" rel="noopener noreferrer" class="text-decoration-none">
+                {{ T . "app.footer.source" }}
+            </a>
+            <a href="mailto:lv.vidya@gmail.com" class="text-decoration-none">
+                {{ T . "app.footer.contact" }}
+            </a>
+            <span>{{ T . "app.footer.version" }}: <code>{{ .Version }}</code></span>
+        </div>
+    </div>
 </footer>
 
 {{/* Bootstrap bundle и htmx 4.0: см. static/vendor/ (make fetch) */}}
