@@ -31,10 +31,11 @@ var DefaultSendBackoff = []time.Duration{
 
 // Service — координатор.
 type Service struct {
-	modem    Modem
-	store    *storage.Store
-	logger   *slog.Logger
-	notifier notify.Notifier
+	modem     Modem
+	modemDesc string
+	store     *storage.Store
+	logger    *slog.Logger
+	notifier  notify.Notifier
 
 	// gammu опционален: nil, если GAMMU_ROOT не задан или
 	// файловый бэкенд отключён.
@@ -99,8 +100,9 @@ type Config struct {
 	SendMaxAttempts int
 	SendBackoff     []time.Duration
 
-	SelfNumber     string
-	TestSMSTimeout time.Duration
+	SelfNumber       string
+	TestSMSTimeout   time.Duration
+	ModemDescription string
 
 	Notifier notify.Notifier
 
@@ -149,6 +151,7 @@ func New(m Modem, store *storage.Store, logger *slog.Logger, cfg Config) *Servic
 		sendMaxAttempts: cfg.SendMaxAttempts,
 		sendBackoff:     cfg.SendBackoff,
 		selfNumber:      cfg.SelfNumber,
+		modemDesc:       cfg.ModemDescription,
 		testSMSTimeout:  cfg.TestSMSTimeout,
 		notifier:        cfg.Notifier,
 		gammu:           cfg.Gammu,
@@ -168,8 +171,8 @@ func (s *Service) Run(ctx context.Context) error {
 
 	info := s.ModemInfo()
 	s.notifier.Notify(ctx, notify.LevelOK, fmt.Errorf(
-		"modem initialized: %s %s (IMEI: %s)",
-		info.Manufacturer, info.Model, info.IMEI))
+		"%s: modem initialized (IMEI: %s)",
+		s.modemDesc, info.IMEI))
 
 	// Восстановление «сирот»: сообщения source='gammu-outbox'
 	// без записи в gammu_outbox (сервис упал между записью в БД
@@ -713,8 +716,8 @@ func (s *Service) sendOne(ctx context.Context, msg *storage.Message) {
 
 	if attempts > 1 {
 		s.notifier.Notify(ctx, notify.LevelOK, fmt.Errorf(
-			"SMS to %s sent after %d attempts (refs: %v)",
-			msg.Peer, attempts, refs))
+			"%s: SMS to %s sent after %d attempts (refs: %v)",
+			s.modemDesc, msg.Peer, attempts, refs))
 	}
 }
 

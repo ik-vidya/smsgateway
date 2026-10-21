@@ -343,11 +343,12 @@ func runService(_ *cobra.Command, _ []string) error {
 
 	// Сервис.
 	svc := service.New(serviceModem, store, logger, service.Config{
-		DeleteAfterRead: cfg.SMSDeleteAfterRead,
-		SelfNumber:      cfg.SelfNumber,
-		TestSMSTimeout:  cfg.TestSMSTimeout,
-		Notifier:        notifier,
-		Gammu:           gammuMgr,
+		DeleteAfterRead:  cfg.SMSDeleteAfterRead,
+		SelfNumber:       cfg.SelfNumber,
+		ModemDescription: cfg.ModemDescription,
+		TestSMSTimeout:   cfg.TestSMSTimeout,
+		Notifier:         notifier,
+		Gammu:            gammuMgr,
 	})
 
 	svcErr := make(chan error, 1)

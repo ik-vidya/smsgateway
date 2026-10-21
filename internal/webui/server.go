@@ -267,12 +267,13 @@ func (s *Server) baseData(r *http.Request, page string) map[string]any {
 	}
 
 	return map[string]any{
-		"Lang":           lang,
-		"SupportedLangs": supported,
-		"Localizer":      loc,
-		"ActivePage":     page,
-		"Version":        s.version,
-		"Title":          page,
+		"ModemDescription": s.cfg.ModemDescription,
+		"Lang":             lang,
+		"SupportedLangs":   supported,
+		"Localizer":        loc,
+		"ActivePage":       page,
+		"Version":          s.version,
+		"Title":            page,
 	}
 }
 

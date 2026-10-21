@@ -126,6 +126,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		netStat := s.svc.NetworkStatus()
 		resp.Modem = &ModemStatus{
 			Configured:   configured,
+			Description:  s.cfg.ModemDescription,
 			Port:         s.cfg.SerialPort,
 			Profile:      s.cfg.ModemProfile,
 			Manufacturer: info.Manufacturer,

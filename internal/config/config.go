@@ -20,6 +20,7 @@ type Config struct {
 	APIKeys  []string
 
 	// Modem
+	ModemDescription   string
 	SerialPort         string
 	SerialBaud         int
 	ModemCmdTimeout    time.Duration
@@ -80,6 +81,7 @@ func Load(path string) (*Config, error) {
 
 	c := &Config{
 		HTTPAddr:         envDefault("HTTP_ADDR", "127.0.0.1:8080"),
+		ModemDescription: os.Getenv("MODEM_DESCRIPTION"),
 		SerialPort:       os.Getenv("SERIAL_PORT"),
 		ModemProfile:     envDefault("MODEM_PROFILE", "generic"),
 		ModemStorage:     os.Getenv("MODEM_STORAGE"),
@@ -141,6 +143,18 @@ func Load(path string) (*Config, error) {
 	if err := c.validate(); err != nil {
 		return nil, err
 	}
+
+	// Автогенерация MODEM_DESCRIPTION, если не задана
+	if c.ModemDescription == "" && c.SerialPort != "" && c.SerialPort != "none" {
+		hostname, _ := os.Hostname()
+		base := filepath.Base(c.SerialPort)
+		// Если это длинный by-id, берем только хвост
+		if len(base) > 20 {
+			base = "modem"
+		}
+		c.ModemDescription = fmt.Sprintf("%s-%s", hostname, base)
+	}
+
 	return c, nil
 }
 

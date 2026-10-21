@@ -106,6 +106,7 @@ type DBStatus struct {
 // ModemStatus — состояние модема.
 type ModemStatus struct {
 	Configured   bool   `json:"configured"`
+	Description  string `json:"description,omitempty"`
 	Port         string `json:"port,omitempty"`
 	Profile      string `json:"profile,omitempty"`
 	Manufacturer string `json:"manufacturer,omitempty"`
