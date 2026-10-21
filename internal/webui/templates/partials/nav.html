@@ -35,10 +35,12 @@
                        href="/logs">{{ T . "nav.logs" }}</a>
                 </li>
                 {{ end }}
+                {{ if .IsAdmin }}
                 <li class="nav-item">
                     <a class="nav-link {{ if eq .ActivePage "setup" }}active{{ end }}"
                        href="/setup">{{ T . "nav.setup" }}</a>
                 </li>
+                {{ end }}
 
             </ul>
             <ul class="navbar-nav">
