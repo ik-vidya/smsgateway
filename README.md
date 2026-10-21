@@ -132,10 +132,6 @@ make ci        # полный прогон (gofmt, vet, test, build)
 make deploy    # безопасный деплой на удаленный сервер (с бэкапом и откатом)
 ~~~
 
-## Автор
-
-© IK Vidya
-
 ## Лицензия
 
 MIT License. См. файл [LICENSE](LICENSE).
