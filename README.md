@@ -134,9 +134,7 @@ make deploy    # безопасный деплой на удаленный се�
 
 ## Автор
 
-© IK Vidya. 
-Исходный код доступен на [git.vidya.lv](https://git.vidya.lv/vidya/smsgateway).
-Связаться с автором: [lv.vidya@gmail.com](mailto:lv.vidya@gmail.com).
+© IK Vidya
 
 ## Лицензия
 
