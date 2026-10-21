@@ -111,7 +111,7 @@ func (s *Server) withRecover(next http.Handler) http.Handler {
 				)
 				if s.notifier != nil {
 					s.notifier.Notify(r.Context(), notify.LevelCritical,
-						fmt.Errorf("паника в handler %s %s: %v",
+						fmt.Errorf("panic in handler %s %s: %v",
 							r.Method, r.URL.Path, rec))
 				}
 				writeError(w, http.StatusInternalServerError,

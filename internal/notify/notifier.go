@@ -12,7 +12,9 @@ type Level string
 
 const (
 	LevelCritical Level = "critical"
+	LevelError    Level = "error"
 	LevelWarning  Level = "warning"
+	LevelOK       Level = "ok"
 )
 
 // Notifier — приёмник уведомлений.

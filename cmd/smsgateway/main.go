@@ -464,7 +464,7 @@ func runService(_ *cobra.Command, _ []string) error {
 		}
 	case err := <-svcErr:
 		if err != nil {
-			notifier.Notify(ctx, notify.LevelCritical, err)
+			notifier.Notify(ctx, notify.LevelError, err)
 			logger.Error("service: критическая ошибка, перезапуск через 3с", "err", err)
 			cancel()
 

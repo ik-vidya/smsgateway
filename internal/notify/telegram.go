@@ -289,9 +289,16 @@ func (n *TelegramNotifier) dedupCleaner() {
 
 // formatMessage форматирует текст уведомления.
 func formatMessage(level Level, text string) string {
-	prefix := "⚠️"
-	if level == LevelCritical {
+	prefix := "ℹ️"
+	switch level {
+	case LevelCritical:
 		prefix = "🚨"
+	case LevelError:
+		prefix = "❌"
+	case LevelWarning:
+		prefix = "⚠️"
+	case LevelOK:
+		prefix = "✅"
 	}
 	return fmt.Sprintf("%s [%s] smsgateway\n%s",
 		prefix, strings.ToUpper(string(level)), text)

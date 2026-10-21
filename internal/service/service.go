@@ -166,6 +166,11 @@ func (s *Service) Run(ctx context.Context) error {
 		return err
 	}
 
+	info := s.ModemInfo()
+	s.notifier.Notify(ctx, notify.LevelOK, fmt.Errorf(
+		"modem initialized: %s %s (IMEI: %s)",
+		info.Manufacturer, info.Model, info.IMEI))
+
 	// Восстановление «сирот»: сообщения source='gammu-outbox'
 	// без записи в gammu_outbox (сервис упал между записью в БД
 	// и созданием entry). Переводим их в failed.
@@ -357,7 +362,7 @@ func (s *Service) notifyTestResult(ctx context.Context, res TestSMSResult) {
 			"selftest: timeout waiting for DR (status=%s, id=%d)",
 			res.Status, res.ID))
 	case res.Status == storage.StatusDelivered:
-		s.notifier.Notify(ctx, notify.LevelWarning, fmt.Errorf(
+		s.notifier.Notify(ctx, notify.LevelOK, fmt.Errorf(
 			"selftest OK: delivered (id=%d, ref=%d)",
 			res.ID, res.Reference))
 	case res.Status == storage.StatusFailed:
@@ -365,7 +370,7 @@ func (s *Service) notifyTestResult(ctx context.Context, res TestSMSResult) {
 		if msg == "" {
 			msg = "unknown error"
 		}
-		s.notifier.Notify(ctx, notify.LevelCritical, fmt.Errorf(
+		s.notifier.Notify(ctx, notify.LevelError, fmt.Errorf(
 			"selftest FAILED: %s (id=%d)", msg, res.ID))
 	default:
 		s.notifier.Notify(ctx, notify.LevelWarning, fmt.Errorf(
@@ -705,6 +710,12 @@ func (s *Service) sendOne(ctx context.Context, msg *storage.Message) {
 	s.logger.Info("service: SMS отправлено",
 		"id", msg.ID, "parts", len(refs), "refs", refs,
 		"attempts", attempts)
+
+	if attempts > 1 {
+		s.notifier.Notify(ctx, notify.LevelOK, fmt.Errorf(
+			"SMS to %s sent after %d attempts (refs: %v)",
+			msg.Peer, attempts, refs))
+	}
 }
 
 func (s *Service) sendWithRetry(ctx context.Context, msg *storage.Message) (modem.SendResult, int, error) {
