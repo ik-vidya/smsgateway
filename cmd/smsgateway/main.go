@@ -397,7 +397,7 @@ func runService(_ *cobra.Command, _ []string) error {
 		if cfg.ModemDescription != "" {
 			stopMsg = cfg.ModemDescription + ": " + stopMsg
 		}
-		notifier.Notify(ctx, notify.LevelWarning, fmt.Errorf("%s", stopMsg))
+		notifier.Notify(ctx, notify.LevelCritical, fmt.Errorf("%s", stopMsg))
 
 		shutdownCtx, cancel := context.WithTimeout(
 			context.Background(), 10*time.Second)
