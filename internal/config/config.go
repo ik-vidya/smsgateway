@@ -216,6 +216,19 @@ func (c *Config) validate() error {
 		errs = append(errs, fmt.Errorf(
 			"LOG_FORMAT должен быть text|json, получено %q", c.LogFormat))
 	}
+	// Web UI Auth
+	if c.WebUIAuthMode == "basic" {
+		if c.WebUIAuthUser == "" || c.WebUIAuthPass == "" {
+			errs = append(errs, fmt.Errorf("webui: для WEBUI_AUTH_MODE=basic нужны WEBUI_AUTH_USER и WEBUI_AUTH_PASS"))
+		}
+		if c.WebUIAuthAdmin == "" {
+			c.WebUIAuthAdmin = c.WebUIAuthUser
+			c.WebUIAuthAdminPass = c.WebUIAuthPass
+		} else if c.WebUIAuthAdminPass == "" {
+			errs = append(errs, fmt.Errorf("webui: для WEBUI_AUTH_ADMIN нужен WEBUI_AUTH_ADMIN_PASS"))
+		}
+	}
+
 	// Telegram: либо оба параметра, либо ни одного.
 	hasToken := strings.TrimSpace(c.TelegramBotToken) != ""
 	hasChat := strings.TrimSpace(c.TelegramChatID) != ""

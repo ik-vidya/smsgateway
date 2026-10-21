@@ -146,30 +146,30 @@ func (s *Server) Shutdown(ctx context.Context) error {
 func (s *Server) routes() http.Handler {
 	mux := http.NewServeMux()
 
-	// /healthz — для heartbeat'а на /setup (fetch раз в 2с).
-	// Без авторизации: проверяем только «процесс жив»,
-	// никаких данных.
+	// /healthz без авторизации (для heartbeat)
 	mux.HandleFunc("GET /healthz", s.handleHealthz)
 
+	// Публичные страницы (доступны User и Admin)
 	mux.HandleFunc("GET /{$}", s.handleDashboard)
 	mux.HandleFunc("GET /inbox", s.handleInbox)
 	mux.HandleFunc("GET /outbox", s.handleOutbox)
-	mux.HandleFunc("GET /compose", s.handleComposeForm)
-	mux.HandleFunc("POST /compose", s.handleComposeSubmit)
 	mux.HandleFunc("GET /messages/{id}", s.handleMessageDetail)
-	mux.HandleFunc("POST /messages/{id}/retry", s.handleMessageRetry)
-	mux.HandleFunc("POST /messages/{id}/cancel", s.handleMessageCancel)
-	mux.HandleFunc("GET /logs", s.handleLogs)
-	mux.HandleFunc("GET /logs/stream", s.handleLogsStream)
-	mux.HandleFunc("GET /logs/download", s.handleLogsDownload)
-	mux.HandleFunc("GET /setup", s.handleSetup)
-	mux.HandleFunc("GET /setup/ports/stream", s.handleSetupPortsStream)
-	mux.HandleFunc("POST /setup/probe", s.handleSetupProbe)
-	mux.HandleFunc("POST /setup/save", s.handleSetupSave)
-	mux.HandleFunc("POST /setup/test", s.handleSetupTest)
-	mux.HandleFunc("GET /setup/diagnostics", s.handleSetupDiagnostics)
-	mux.HandleFunc("POST /setup/test-receive", s.handleSetupTestReceive)
 	mux.HandleFunc("GET /lang/{code}", s.handleLangSet)
+
+	// Админские страницы и действия
+	mux.Handle("GET /compose", s.requireAdmin(http.HandlerFunc(s.handleComposeForm)))
+	mux.Handle("POST /compose", s.requireAdmin(http.HandlerFunc(s.handleComposeSubmit)))
+	mux.Handle("GET /logs", s.requireAdmin(http.HandlerFunc(s.handleLogs)))
+	mux.Handle("GET /logs/stream", s.requireAdmin(http.HandlerFunc(s.handleLogsStream)))
+	mux.Handle("GET /logs/download", s.requireAdmin(http.HandlerFunc(s.handleLogsDownload)))
+	mux.Handle("GET /setup", s.requireAdmin(http.HandlerFunc(s.handleSetup)))
+	mux.Handle("GET /setup/ports/stream", s.requireAdmin(http.HandlerFunc(s.handleSetupPortsStream)))
+	mux.Handle("POST /setup/probe", s.requireAdmin(http.HandlerFunc(s.handleSetupProbe)))
+	mux.Handle("POST /setup/save", s.requireAdmin(http.HandlerFunc(s.handleSetupSave)))
+	mux.Handle("POST /setup/test", s.requireAdmin(http.HandlerFunc(s.handleSetupTest)))
+	mux.Handle("POST /setup/test-receive", s.requireAdmin(http.HandlerFunc(s.handleSetupTestReceive)))
+	mux.Handle("POST /messages/{id}/retry", s.requireAdmin(http.HandlerFunc(s.handleMessageRetry)))
+	mux.Handle("POST /messages/{id}/cancel", s.requireAdmin(http.HandlerFunc(s.handleMessageCancel)))
 
 	mux.Handle("GET /static/", newStaticHandler())
 
@@ -266,7 +266,11 @@ func (s *Server) baseData(r *http.Request, page string) map[string]any {
 		supported = []string{"en"}
 	}
 
+	role, _ := r.Context().Value(RoleKey).(string)
+	isAdmin := role == "admin"
+
 	return map[string]any{
+		"IsAdmin":          isAdmin,
 		"ModemDescription": s.cfg.ModemDescription,
 		"Lang":             lang,
 		"SupportedLangs":   supported,
