@@ -62,13 +62,15 @@ type Config struct {
 	TelegramLang     string
 
 	// Web UI
-	WebUIEnabled     bool
-	WebUIAddr        string
-	WebUIAuthMode    string
-	WebUIAuthUser    string
-	WebUIAuthPass    string
-	WebUIDefaultLang string
-	WebUISupported   []string
+	WebUIEnabled       bool
+	WebUIAddr          string
+	WebUIAuthMode      string
+	WebUIAuthUser      string
+	WebUIAuthPass      string
+	WebUIAuthAdmin     string
+	WebUIAuthAdminPass string
+	WebUIDefaultLang   string
+	WebUISupported     []string
 }
 
 // Load читает .env по указанному пути и валидирует результат.
@@ -81,30 +83,32 @@ func Load(path string) (*Config, error) {
 	}
 
 	c := &Config{
-		HTTPAddr:         envDefault("HTTP_ADDR", "127.0.0.1:8080"),
-		ModemDescription: os.Getenv("MODEM_DESCRIPTION"),
-		SerialPort:       os.Getenv("SERIAL_PORT"),
-		ModemProfile:     envDefault("MODEM_PROFILE", "generic"),
-		ModemStorage:     os.Getenv("MODEM_STORAGE"),
-		ModemPIN:         os.Getenv("MODEM_PIN"),
-		DBPath:           os.Getenv("DB_PATH"),
-		GammuRoot:        os.Getenv("GAMMU_ROOT"),
-		GammuInbox:       envDefault("GAMMU_INBOX", "inbox"),
-		GammuOutbox:      envDefault("GAMMU_OUTBOX", "outbox"),
-		GammuSent:        envDefault("GAMMU_SENT", "sent"),
-		GammuError:       envDefault("GAMMU_ERROR", "error"),
-		GammuInboxFormat: envDefault("GAMMU_INBOX_FORMAT", "utf8"),
-		LogLevel:         envDefault("LOG_LEVEL", "info"),
-		LogFormat:        envDefault("LOG_FORMAT", "text"),
-		SelfNumber:       os.Getenv("SELF_NUMBER"),
-		TelegramBotToken: os.Getenv("TELEGRAM_BOT_TOKEN"),
-		TelegramChatID:   os.Getenv("TELEGRAM_CHAT_ID"),
-		TelegramLang:     envDefault("TELEGRAM_LANG", "ru"),
-		WebUIAddr:        envDefault("WEBUI_ADDR", "127.0.0.1:8081"),
-		WebUIAuthMode:    envDefault("WEBUI_AUTH_MODE", "none"),
-		WebUIAuthUser:    os.Getenv("WEBUI_AUTH_USER"),
-		WebUIAuthPass:    os.Getenv("WEBUI_AUTH_PASS"),
-		WebUIDefaultLang: envDefault("WEBUI_DEFAULT_LANG", "en"),
+		HTTPAddr:           envDefault("HTTP_ADDR", "127.0.0.1:8080"),
+		ModemDescription:   os.Getenv("MODEM_DESCRIPTION"),
+		SerialPort:         os.Getenv("SERIAL_PORT"),
+		ModemProfile:       envDefault("MODEM_PROFILE", "generic"),
+		ModemStorage:       os.Getenv("MODEM_STORAGE"),
+		ModemPIN:           os.Getenv("MODEM_PIN"),
+		DBPath:             os.Getenv("DB_PATH"),
+		GammuRoot:          os.Getenv("GAMMU_ROOT"),
+		GammuInbox:         envDefault("GAMMU_INBOX", "inbox"),
+		GammuOutbox:        envDefault("GAMMU_OUTBOX", "outbox"),
+		GammuSent:          envDefault("GAMMU_SENT", "sent"),
+		GammuError:         envDefault("GAMMU_ERROR", "error"),
+		GammuInboxFormat:   envDefault("GAMMU_INBOX_FORMAT", "utf8"),
+		LogLevel:           envDefault("LOG_LEVEL", "info"),
+		LogFormat:          envDefault("LOG_FORMAT", "text"),
+		SelfNumber:         os.Getenv("SELF_NUMBER"),
+		TelegramBotToken:   os.Getenv("TELEGRAM_BOT_TOKEN"),
+		TelegramChatID:     os.Getenv("TELEGRAM_CHAT_ID"),
+		TelegramLang:       envDefault("TELEGRAM_LANG", "ru"),
+		WebUIAddr:          envDefault("WEBUI_ADDR", "127.0.0.1:8081"),
+		WebUIAuthMode:      envDefault("WEBUI_AUTH_MODE", "none"),
+		WebUIAuthUser:      os.Getenv("WEBUI_AUTH_USER"),
+		WebUIAuthPass:      os.Getenv("WEBUI_AUTH_PASS"),
+		WebUIAuthAdmin:     os.Getenv("WEBUI_AUTH_ADMIN"),
+		WebUIAuthAdminPass: os.Getenv("WEBUI_AUTH_ADMIN_PASS"),
+		WebUIDefaultLang:   envDefault("WEBUI_DEFAULT_LANG", "en"),
 	}
 
 	c.APIKeys = splitNonEmpty(os.Getenv("API_KEYS"), ",")

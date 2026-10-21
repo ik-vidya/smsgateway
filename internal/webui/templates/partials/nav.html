@@ -25,6 +25,7 @@
                     <a class="nav-link {{ if eq .ActivePage "outbox" }}active{{ end }}"
                        href="/outbox">{{ T . "nav.outbox" }}</a>
                 </li>
+                {{ if .IsAdmin }}
                 <li class="nav-item">
                     <a class="nav-link {{ if eq .ActivePage "compose" }}active{{ end }}"
                        href="/compose">{{ T . "nav.compose" }}</a>
@@ -33,6 +34,7 @@
                     <a class="nav-link {{ if eq .ActivePage "logs" }}active{{ end }}"
                        href="/logs">{{ T . "nav.logs" }}</a>
                 </li>
+                {{ end }}
                 <li class="nav-item">
                     <a class="nav-link {{ if eq .ActivePage "setup" }}active{{ end }}"
                        href="/setup">{{ T . "nav.setup" }}</a>

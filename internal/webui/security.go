@@ -1,18 +1,17 @@
-// Package webui, файл security.go — security headers и CSRF.
 package webui
 
 import (
+	"context"
 	"net/http"
 	"net/url"
 	"strings"
 )
 
+type ctxKey string
+
+const RoleKey ctxKey = "role"
+
 // withSecurityHeaders выставляет защитные заголовки.
-//
-// CSP разрешает только 'self': Bootstrap и htmx хранятся локально
-// в static/vendor. 'unsafe-inline' оставлен для style-src —
-// Bootstrap динамически создаёт inline-стили при показе modal
-// backdrop и tooltip.
 func withSecurityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
@@ -33,18 +32,57 @@ func withSecurityHeaders(next http.Handler) http.Handler {
 	})
 }
 
+// withBasicAuth проверяет HTTP Basic Auth и определяет роль (admin/user).
+func (s *Server) withBasicAuth(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.cfg.WebUIAuthMode != "basic" {
+			// Если авторизация выключена, все - админы.
+			ctx := context.WithValue(r.Context(), RoleKey, "admin")
+			next.ServeHTTP(w, r.WithContext(ctx))
+			return
+		}
+
+		user, pass, ok := r.BasicAuth()
+		if !ok {
+			s.requestAuth(w)
+			return
+		}
+
+		role := ""
+		if user == s.cfg.WebUIAuthAdmin && pass == s.cfg.WebUIAuthAdminPass {
+			role = "admin"
+		} else if user == s.cfg.WebUIAuthUser && pass == s.cfg.WebUIAuthPass {
+			role = "user"
+		}
+
+		if role == "" {
+			s.requestAuth(w)
+			return
+		}
+
+		ctx := context.WithValue(r.Context(), RoleKey, role)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+func (s *Server) requestAuth(w http.ResponseWriter) {
+	w.Header().Set("WWW-Authenticate", `Basic realm="smsgateway"`)
+	http.Error(w, "Unauthorized", http.StatusUnauthorized)
+}
+
+// requireAdmin пропускает дальше только администраторов.
+func (s *Server) requireAdmin(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		role, _ := r.Context().Value(RoleKey).(string)
+		if role != "admin" {
+			http.Error(w, "Forbidden: admin access required", http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 // withCSRF проверяет Origin/Referer для небезопасных методов.
-//
-// Логика:
-//   - GET/HEAD/OPTIONS пропускаются.
-//   - Если заголовок Origin задан, его host должен совпадать
-//     с r.Host.
-//   - Если Origin пуст, но задан Referer — используем его host.
-//   - Если оба пусты (curl, Go http.Client, тесты) — пропускаем:
-//     это не браузерный сценарий, CSRF-атака невозможна.
-//
-// Вместе с SameSite=Lax на cookie "lang" этого достаточно для
-// первой версии без сессий.
 func withCSRF(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
@@ -52,7 +90,6 @@ func withCSRF(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-
 		if !sameOrigin(r) {
 			http.Error(w, "CSRF: cross-origin request rejected",
 				http.StatusForbidden)
@@ -80,20 +117,4 @@ func sameOrigin(r *http.Request) bool {
 		return u.Host == r.Host
 	}
 	return true
-}
-
-// withBasicAuth проверяет HTTP Basic Auth, если включён режим basic.
-func (s *Server) withBasicAuth(next http.Handler) http.Handler {
-	if s.cfg.WebUIAuthMode != "basic" {
-		return next
-	}
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		user, pass, ok := r.BasicAuth()
-		if !ok || user != s.cfg.WebUIAuthUser || pass != s.cfg.WebUIAuthPass {
-			w.Header().Set("WWW-Authenticate", `Basic realm="smsgateway"`)
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
 }

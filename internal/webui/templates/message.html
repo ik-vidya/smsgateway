@@ -53,7 +53,7 @@
                     <dd class="col-sm-7 text-danger">{{ .Message.Error }}</dd>
                     {{ end }}
 
-                    {{ if eq .Message.Status "queued" }}
+                    {{ if and .IsAdmin (eq .Message.Status "queued") }}
                     <dt class="col-sm-5">{{ T . "messages.cancel" }}</dt>
                     <dd class="col-sm-7">
                         <form method="post" action="/messages/{{ .Message.ID }}/cancel">
@@ -62,7 +62,7 @@
                     </dd>
                     {{ end }}
 
-                    {{ if eq .Message.Status "failed" }}
+                    {{ if and .IsAdmin (eq .Message.Status "failed") }}
                     <dt class="col-sm-5">{{ T . "messages.retry" }}</dt>
                     <dd class="col-sm-7">
                         <form method="post" action="/messages/{{ .Message.ID }}/retry">
