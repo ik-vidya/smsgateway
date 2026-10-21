@@ -7,11 +7,10 @@
 ## Возможности
 
 - **Отправка и прием SMS**: Поддержка текстовых сообщений, кириллицы (UCS-2) и длинных SMS (Multipart).
-- **Web UI**: Удобный интерфейс для мониторинга, поиска, отправки сообщений и настройки модема.
-- **Безопасность**: Поддержка HTTP Basic Auth для защиты Web UI.
+- **Web UI с ролями**: Удобный интерфейс с поддержкой ролей Администратор / Пользователь (только чтение).
+- **Уведомления в Telegram**: 4 уровня важности (OK, Warning, Error, Critical), локализация (ru/lv/en) и имя модема в сообщениях.
 - **REST API**: Полноценное API для интеграции с вашими приложениями.
 - **Gammu File Backend**: Чтение из `outbox`, запись в `inbox`, автоматическая генерация отчетов о доставке (Delivery Reports).
-- **Управление очередью**: Возможность отменить ошибочно отправленное сообщение или повторить отправку при сбое.
 
 ## Быстрый старт
 
@@ -49,21 +48,43 @@ sudo ./bin/smsgateway --config .env
 
 Все настройки задаются через переменные окружения в файле `.env`.
 
-### Web UI и Безопасность
-По умолчанию Web UI работает без пароля. Если вы выставляете его в сеть, включите Basic Auth:
+### Идентификация модема
+~~~env
+# Человекочитаемое имя модема (для Telegram и Web UI).
+# Если пусто, генерируется автоматически как <hostname>-<port> 
+# (например, rsmodule-tallin1-ttyUSB0).
+MODEM_DESCRIPTION=
+
+SERIAL_PORT=/dev/serial/by-id/usb-1a86_USB2.0-Serial-if00-port0
+MODEM_PROFILE=sim800
+~~~
+
+### Web UI и Безопасность (RBAC)
+Поддерживается два уровня доступа: Администратор (полный доступ) и Пользователь (только просмотр входящих и исходящих SMS).
 
 ~~~env
 WEBUI_ENABLED=true
 WEBUI_ADDR=127.0.0.1:8081
 WEBUI_AUTH_MODE=basic
-WEBUI_AUTH_USER=admin
-WEBUI_AUTH_PASS=your_strong_password
+
+# Пользователь (только чтение: Inbox, Outbox)
+WEBUI_AUTH_USER=operator
+WEBUI_AUTH_PASS=user_password
+
+# Администратор (отправка SMS, логи, настройка модема)
+WEBUI_AUTH_ADMIN=admin
+WEBUI_AUTH_ADMIN_PASS=admin_password
+
+# Если WEBUI_AUTH_ADMIN не задан, права администратора 
+# наследуются от обычного пользователя (обратная совместимость).
 ~~~
 
-### Модем
+### Уведомления в Telegram
 ~~~env
-SERIAL_PORT=/dev/serial/by-id/usb-1a86_USB2.0-Serial-if00-port0
-MODEM_PROFILE=sim800
+TELEGRAM_BOT_TOKEN=your_bot_token
+TELEGRAM_CHAT_ID=your_chat_id
+# Язык уведомлений: ru | lv | en
+TELEGRAM_LANG=ru
 ~~~
 
 ### Gammu File Backend (Опционально)
@@ -79,24 +100,17 @@ GAMMU_ERROR=error
 
 ## Интеграция с внешними системами (Gammu)
 
-`smsgateway` может работать как замена `gammu-smsd`, используя файловый обмен. 
+`smsgateway` может работать как замена `gammu-smsd`, используя файловый обмен.
 
-### Отправка (Outbox)
-Внешняя система кладет файл `OUT*.txt` в папку `outbox`. Шлюз отправляет SMS и перемещает файл в `sent`.
-
-### Получение (Inbox)
-Принятые SMS сохраняются в базу и дублируются в папку `inbox` (в формате plain text).
-
-### Отчеты о доставке (Delivery Reports)
-Если внешней системе нужно знать статус доставки, шлюз генерирует специальные файлы в папке `inbox`:
-`IN<дата>_<sms_id>_<номер>_00.txt` (с текстом `DELIVERED` или `FAILED`). 
-`sms_id` берется из имени исходящего файла (Serial).
+- **Отправка (Outbox)**: Внешняя система кладет файл `OUT*.txt` в папку `outbox`. Шлюз отправляет SMS и перемещает файл в `sent`.
+- **Получение (Inbox)**: Принятые SMS сохраняются в базу и дублируются в папку `inbox` (в формате plain text).
+- **Отчеты о доставке (Delivery Reports)**: Если внешней системе нужно знать статус доставки, шлюз генерирует специальные файлы в папке `inbox`: `IN<дата>_<sms_id>_<номер>_00.txt` (с текстом `DELIVERED` или `FAILED`).
 
 ## REST API
 
 Базовый путь: `/api/v1`. Аутентификация через заголовок `X-API-Key` или `Authorization: Bearer <key>`.
 
-- `GET /healthz` — проверка работоспособности (без авторизации).
+- `GET /healthz` — проверка работоспособности.
 - `GET /api/v1/status` — состояние сервиса и модема.
 - `POST /api/v1/messages` — поставить SMS в очередь на отправку.
 - `GET /api/v1/messages` — список сообщений (с фильтрами).
@@ -117,6 +131,12 @@ make test-race # запустить тесты с race detector
 make ci        # полный прогон (gofmt, vet, test, build)
 make deploy    # безопасный деплой на удаленный сервер (с бэкапом и откатом)
 ~~~
+
+## Автор
+
+© IK Vidya. 
+Исходный код доступен на [git.vidya.lv](https://git.vidya.lv/vidya/smsgateway).
+Связаться с автором: [lv.vidya@gmail.com](mailto:lv.vidya@gmail.com).
 
 ## Лицензия
 
