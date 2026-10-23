@@ -1,0 +1,33 @@
+[Unit]
+Description=SMS Gateway for %i
+Wants=network-online.target
+After=network-online.target
+# Запускаем только если udev создал симлинк (наша программа сама подождет порт, но так надежнее)
+ConditionPathExists=/dev/%i
+
+[Service]
+Type=simple
+# Ищем .env файл по имени инстанса (например, /etc/smsgateway/sms-rsavs.env)
+EnvironmentFile=/etc/smsgateway/%i.env
+ExecStart=/usr/local/bin/smsgateway --config=/etc/smsgateway/%i.env
+
+# Ключевые настройки перезапуска (для MODEM_RECONNECT_MODE=systemd)
+Restart=always
+RestartSec=5
+TimeoutStopSec=15
+
+# Безопасность
+User=smsgateway
+Group=dialout
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/smsgateway /var/spool/sms
+
+# Логи в journald
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
