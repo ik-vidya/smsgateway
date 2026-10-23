@@ -268,10 +268,17 @@ func runService(_ *cobra.Command, _ []string) error {
 		}
 		logger.Info("профиль модема", "profile", profile.Name())
 
+		attempts := 10
+		delay := 5 * time.Second
+		if cfg.ModemReconnectMode == "standalone" {
+			attempts = 60
+			delay = 1 * time.Second
+		}
+
 		port, err := modem.OpenSerialWithRetry(modem.SerialConfig{
 			Port: cfg.SerialPort,
 			Baud: cfg.SerialBaud,
-		}, 60, time.Second, slogAdapter{logger})
+		}, attempts, delay, slogAdapter{logger})
 		if err != nil {
 			err = fmt.Errorf("открытие serial: %w", err)
 			notifier.Notify(ctx, notify.LevelCritical, err)
@@ -481,7 +488,7 @@ func runService(_ *cobra.Command, _ []string) error {
 	case err := <-svcErr:
 		if err != nil {
 			notifier.Notify(ctx, notify.LevelError, err)
-			logger.Error("service: критическая ошибка, перезапуск через 3с", "err", err)
+			logger.Error("service: критическая ошибка", "err", err)
 			cancel()
 
 			shutdownCtx, shutdownCancel := context.WithTimeout(
@@ -498,17 +505,26 @@ func runService(_ *cobra.Command, _ []string) error {
 
 			cleanup()
 
-			exe, errExe := os.Executable()
-			if errExe != nil {
-				exe = "/proc/self/exe"
+			switch cfg.ModemReconnectMode {
+			case "standalone":
+				exe, errExe := os.Executable()
+				if errExe != nil {
+					exe = "/proc/self/exe"
+				}
+				logger.Info("standalone: перезапуск через 3с", "exe", exe)
+				time.Sleep(3 * time.Second)
+				if errExec := syscall.Exec(exe, os.Args, os.Environ()); errExec != nil {
+					logger.Error("syscall.Exec", "err", errExec)
+					return fmt.Errorf("syscall.Exec: %w", errExec)
+				}
+				return nil
+			case "container":
+				logger.Info("container: выход, оркестратор перезапустит")
+				return fmt.Errorf("service: %w", err)
+			default: // systemd
+				logger.Info("systemd: выход, systemd перезапустит")
+				return fmt.Errorf("service: %w", err)
 			}
-			time.Sleep(3 * time.Second)
-			logger.Info("exec", "exe", exe, "args", os.Args)
-			if errExec := syscall.Exec(exe, os.Args, os.Environ()); errExec != nil {
-				logger.Error("syscall.Exec", "err", errExec)
-				return fmt.Errorf("syscall.Exec: %w", errExec)
-			}
-			return nil
 		}
 	}
 

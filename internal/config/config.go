@@ -21,6 +21,7 @@ type Config struct {
 
 	// Modem
 	ModemDescription   string
+	ModemReconnectMode string
 	SerialPort         string
 	SerialBaud         int
 	ModemCmdTimeout    time.Duration
@@ -86,6 +87,7 @@ func Load(path string) (*Config, error) {
 	c := &Config{
 		HTTPAddr:           envDefault("HTTP_ADDR", "127.0.0.1:8080"),
 		ModemDescription:   os.Getenv("MODEM_DESCRIPTION"),
+		ModemReconnectMode: envDefault("MODEM_RECONNECT_MODE", "systemd"),
 		SerialPort:         os.Getenv("SERIAL_PORT"),
 		ModemProfile:       envDefault("MODEM_PROFILE", "generic"),
 		ModemStorage:       os.Getenv("MODEM_STORAGE"),
@@ -179,6 +181,14 @@ func (c *Config) validate() error {
 	if len(c.APIKeys) == 0 {
 		errs = append(errs, errors.New("нужен API_KEY или API_KEYS"))
 	}
+	switch strings.ToLower(c.ModemReconnectMode) {
+	case "standalone", "systemd", "container":
+	default:
+		errs = append(errs, fmt.Errorf(
+			"MODEM_RECONNECT_MODE должен быть standalone|systemd|container, получено %q",
+			c.ModemReconnectMode))
+	}
+
 	switch strings.ToLower(c.ModemProfile) {
 	case "sim800", "quectel", "telit", "huawei", "generic":
 	default:
