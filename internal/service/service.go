@@ -823,12 +823,22 @@ func (s *Service) processExpiredReferences(ctx context.Context) {
 
 func (s *Service) HandleDeliveryReport(ctx context.Context, ref int, tpst int, rawPDU string) error {
 	msgID, err := s.store.FindPendingReference(ctx, int64(ref))
+	var msgIDNull sql.NullInt64
+
 	if err != nil {
-		return fmt.Errorf("FindPendingReference(%d): %w", ref, err)
+		// Reference не найден: истек TTL (1 час), уже был обработан
+		// или это DR на сообщение, отправленное до перезапуска.
+		s.logger.Warn("service: DR для неизвестного reference", "ref", ref)
+		msgIDNull = sql.NullInt64{Valid: false}
+	} else {
+		msgIDNull = sql.NullInt64{Int64: msgID, Valid: true}
+		if err := s.store.ReleaseReference(ctx, int64(ref)); err != nil {
+			s.logger.Warn("service: ReleaseReference", "ref", ref, "err", err)
+		}
 	}
 
 	dr := &storage.DeliveryReport{
-		MessageID:  nullInt64(msgID),
+		MessageID:  msgIDNull,
 		Reference:  int64(ref),
 		TPST:       tpst,
 		StatusText: interpretTPST(tpst),
@@ -838,22 +848,21 @@ func (s *Service) HandleDeliveryReport(ctx context.Context, ref int, tpst int, r
 	if _, err := s.store.CreateDeliveryReport(ctx, dr); err != nil {
 		return fmt.Errorf("CreateDeliveryReport: %w", err)
 	}
-	if err := s.store.ReleaseReference(ctx, int64(ref)); err != nil {
-		s.logger.Warn("service: ReleaseReference", "ref", ref, "err", err)
-	}
 
-	if msg, err := s.store.GetMessage(ctx, msgID); err == nil {
-		if msg.GammuSerial.Valid && s.gammu != nil {
-			delivered := (tpst == 0x00)
-			_, err := s.gammu.Inbox().WriteDeliveryReport(int(msg.GammuSerial.Int64), msg.Peer, delivered)
-			if err != nil {
-				s.logger.Warn("service: WriteDeliveryReport", "err", err, "serial", msg.GammuSerial.Int64)
+	if msgIDNull.Valid {
+		if msg, err := s.store.GetMessage(ctx, msgIDNull.Int64); err == nil {
+			if msg.GammuSerial.Valid && s.gammu != nil {
+				delivered := (tpst == 0x00)
+				_, err := s.gammu.Inbox().WriteDeliveryReport(int(msg.GammuSerial.Int64), msg.Peer, delivered)
+				if err != nil {
+					s.logger.Warn("service: WriteDeliveryReport", "err", err, "serial", msg.GammuSerial.Int64)
+				}
 			}
 		}
 	}
 
-	s.logger.Info("service: DR обработан",
-		"ref", ref, "msg_id", msgID, "tpst", tpst)
+	s.logger.Info("service: DR сохранен",
+		"ref", ref, "msg_id", msgIDNull, "tpst", tpst)
 	return nil
 }
 

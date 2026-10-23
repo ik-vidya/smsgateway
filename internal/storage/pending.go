@@ -10,8 +10,9 @@ import (
 	"time"
 )
 
-// ErrReferenceBusy — все 256 reference заняты или произошла коллизия.
-var ErrReferenceBusy = errors.New("reference занят")
+// ErrReferenceBusy — reference не найден (просрочен, уже обработан
+// или не был забронирован). Историческое название.
+var ErrReferenceBusy = errors.New("reference не найден (просрочен или уже обработан)")
 
 // ErrPendingPartNotFound — сборка не найдена.
 var ErrPendingPartNotFound = errors.New("pending part не найдена")
