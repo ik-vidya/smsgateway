@@ -33,6 +33,7 @@ type Config struct {
 	// Storage
 	DBPath       string
 	SMSRetention time.Duration
+	ReferenceTTL time.Duration
 
 	// Gammu file backend
 	//
@@ -129,6 +130,9 @@ func Load(path string) (*Config, error) {
 		return nil, err
 	}
 	if c.SMSRetention, err = envDuration("SMS_RETENTION", 0); err != nil {
+		return nil, err
+	}
+	if c.ReferenceTTL, err = envDuration("REFERENCE_TTL", time.Hour); err != nil {
 		return nil, err
 	}
 	if c.TestSMSTimeout, err = envDuration("TEST_SMS_TIMEOUT", 120*time.Second); err != nil {

@@ -347,6 +347,7 @@ func runService(_ *cobra.Command, _ []string) error {
 		SelfNumber:       cfg.SelfNumber,
 		ModemDescription: cfg.ModemDescription,
 		TelegramLang:     cfg.TelegramLang,
+		ReferenceTTL:     cfg.ReferenceTTL,
 		TestSMSTimeout:   cfg.TestSMSTimeout,
 		Notifier:         notifier,
 		Gammu:            gammuMgr,
